@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>政史地学习 · 学生端</title>
+<style>
+  :root{
+    --bg:#f5f6f8;--card:#fff;--text:#1f2329;--text2:#646a73;--text3:#8f959e;
+    --line:#eceef1;--brand:#e8524a;--brand-soft:#fdeceb;
+    --ok:#2f9e6e;--ok-soft:#e8f6f0;--warn:#e8a33d;--warn-soft:#fdf8ef;
+    --radius:18px;--shadow:0 2px 12px rgba(0,0,0,.05);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+    background:var(--bg);color:var(--text);font-size:15px;line-height:1.6;padding-bottom:84px}
+  .topbar{position:sticky;top:0;z-index:50;background:rgba(245,246,248,.94);
+    backdrop-filter:saturate(180%) blur(12px);-webkit-backdrop-filter:saturate(180%) blur(12px);
+    border-bottom:1px solid var(--line)}
+  .topbar-inner{max-width:520px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:10px}
+  .logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#e8524a,#d97b2b);
+    color:#fff;font-size:16px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .topbar h1{font-size:16px;margin:0;font-weight:600;line-height:1.25}
+  .topbar p{margin:1px 0 0;font-size:11px;color:var(--text3)}
+  .streak{margin-left:auto;font-size:11px;color:var(--warn);background:var(--warn-soft);
+    border-radius:10px;padding:5px 9px;font-weight:600;white-space:nowrap}
+  .wrap{max-width:520px;margin:0 auto;padding:16px}
+  .screen{display:none}.screen.active{display:block;animation:fade .25s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .card{background:var(--card);border-radius:var(--radius);padding:16px;margin-bottom:12px;
+    box-shadow:var(--shadow);border:1px solid var(--line)}
+  .card h2{font-size:16px;margin:0 0 6px;font-weight:600}
+  .card .sub{font-size:12px;color:var(--text3);margin:0 0 12px}
+  .course-item{display:flex;gap:12px;align-items:center;background:var(--card);border-radius:var(--radius);
+    padding:14px 16px;margin-bottom:10px;box-shadow:var(--shadow);border:1px solid var(--line);
+    cursor:pointer;transition:transform .12s}
+  .course-item:active{transform:scale(.98)}
+  .course-badge{width:42px;height:42px;border-radius:12px;flex:0 0 auto;display:flex;
+    align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:700}
+  .course-info{flex:1;min-width:0}
+  .course-info .ct{font-size:14px;font-weight:600;margin:0;line-height:1.3}
+  .course-info .cs{font-size:11px;color:var(--text3);margin:3px 0 0}
+  .course-prog{font-size:11px;color:var(--text3);text-align:right;flex:0 0 auto}
+  .course-prog b{display:block;font-size:15px;color:var(--ok)}
+  .arrow{color:#c9cdd4;font-size:18px}
+  .detail-head{border-radius:var(--radius);padding:18px;color:#fff;margin-bottom:12px;box-shadow:var(--shadow)}
+  .detail-head .dh-no{font-size:12px;opacity:.85;margin:0}
+  .detail-head h2{font-size:17px;margin:4px 0 4px;line-height:1.4;font-weight:600}
+  .detail-head .dh-sub{font-size:12px;opacity:.85;margin:0}
+  .back{display:inline-flex;align-items:center;gap:4px;font-size:13px;color:var(--text2);
+    margin-bottom:10px;background:none;border:none;padding:0;cursor:pointer;font-family:inherit}
+  .tabs{display:flex;gap:6px;margin-bottom:12px;overflow-x:auto}
+  .tab{flex:1;min-width:74px;text-align:center;padding:9px 4px;font-size:13px;background:#fff;
+    border:1px solid var(--line);border-radius:12px;color:var(--text2);cursor:pointer;
+    font-family:inherit;transition:all .15s;white-space:nowrap}
+  .tab.on{background:var(--text);color:#fff;border-color:var(--text);font-weight:600}
+  .pt{background:#fff;border-radius:16px;padding:14px 16px;margin-bottom:10px;
+    border:1px solid var(--line);box-shadow:var(--shadow)}
+  .pt h3{font-size:14px;margin:0 0 7px;font-weight:600;display:flex;gap:6px}
+  .pt .body{font-size:13.5px;color:#333;line-height:1.75}
+  .pt .body b{color:var(--brand);font-weight:600}
+  .pt .tip{margin-top:9px;font-size:12px;color:var(--warn);background:var(--warn-soft);
+    border-radius:9px;padding:8px 10px;border-left:3px solid var(--warn)}
+  /* ---- 视频卡片 ---- */
+  .vid{background:#fff;border-radius:16px;padding:14px 16px;margin-bottom:10px;
+    border:1px solid var(--line);box-shadow:var(--shadow);position:relative}
+  .vid.must{border-left:4px solid var(--brand)}
+  .vid.may{border-left:4px solid var(--warn)}
+  .vid.extra{border-left:4px solid #c9cdd4}
+  .vid .vtop{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}
+  .lvl{font-size:10px;padding:2px 8px;border-radius:6px;font-weight:700;flex:0 0 auto}
+  .lvl.must{background:var(--brand-soft);color:var(--brand)}
+  .lvl.may{background:var(--warn-soft);color:var(--warn)}
+  .lvl.extra{background:#f2f3f5;color:var(--text3)}
+  .vid .vtag{font-size:10px;padding:2px 7px;border-radius:6px;background:#f2f3f5;color:var(--text2);flex:0 0 auto}
+  .vid .vname{font-size:14px;font-weight:600;flex:1;min-width:120px}
+  .vid .vnote{font-size:12px;color:var(--text2);margin:0 0 6px;line-height:1.55}
+  .vid .vseg{font-size:12px;color:var(--ok);background:var(--ok-soft);border-radius:9px;
+    padding:8px 10px;margin:0 0 10px;line-height:1.55;display:flex;gap:6px}
+  .vid .vcov{font-size:11px;color:var(--text3);margin:0 0 10px}
+  .vid a,.vid button{display:block;width:100%;text-align:center;text-decoration:none;border:none;
+    background:var(--brand);color:#fff;font-size:13px;font-weight:600;padding:10px;
+    border-radius:11px;font-family:inherit;cursor:pointer}
+  .vid a:active,.vid button:active{opacity:.85}
+  /* ---- 测验 ---- */
+  .qbox{background:#fff;border-radius:16px;padding:16px;margin-bottom:10px;
+    border:1px solid var(--line);box-shadow:var(--shadow)}
+  .qnum{font-size:11px;color:var(--brand);font-weight:700;margin-bottom:6px}
+  .qtxt{font-size:14px;font-weight:600;margin:0 0 12px;line-height:1.55}
+  .opt{display:flex;gap:9px;align-items:flex-start;padding:11px 12px;border:1.5px solid var(--line);
+    border-radius:12px;margin-bottom:8px;cursor:pointer;font-size:13.5px;transition:all .15s;background:#fff}
+  .opt:active{transform:scale(.99)}
+  .opt .key{width:20px;height:20px;border-radius:50%;flex:0 0 auto;background:#f2f3f5;color:var(--text2);
+    font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:1px}
+  .opt.right{border-color:var(--ok);background:var(--ok-soft)}
+  .opt.right .key{background:var(--ok);color:#fff}
+  .opt.wrong{border-color:var(--brand);background:var(--brand-soft)}
+  .opt.wrong .key{background:var(--brand);color:#fff}
+  .opt.locked{cursor:default}
+  .exp{margin-top:10px;font-size:12.5px;line-height:1.65;background:#f7f8fa;border-radius:10px;
+    padding:10px 12px;color:#43474d;display:none}
+  .exp.show{display:block}.exp b{color:var(--ok)}
+  .btn{display:block;width:100%;text-align:center;padding:13px;border-radius:13px;border:none;
+    cursor:pointer;font-size:14.5px;font-weight:600;font-family:inherit;background:var(--brand);
+    color:#fff;transition:transform .12s}
+  .btn:active{transform:scale(.98)}
+  .btn.ghost{background:#fff;color:var(--text);border:1.5px solid var(--line)}
+  .bar{height:7px;background:var(--line);border-radius:5px;overflow:hidden;margin:8px 0 4px}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,#e8524a,#d97b2b);
+    border-radius:5px;transition:width .4s}
+  .navbar{position:fixed;bottom:0;left:0;right:0;z-index:60;background:rgba(255,255,255,.96);
+    backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-top:1px solid var(--line);
+    display:flex;max-width:520px;margin:0 auto;padding:6px 0 calc(6px + env(safe-area-inset-bottom))}
+  .nav{flex:1;text-align:center;padding:6px 0;cursor:pointer;color:var(--text3);font-size:11px;
+    border:none;background:none;font-family:inherit;position:relative}
+  .nav .ni{font-size:19px;display:block;line-height:1.2}
+  .nav.on{color:var(--brand);font-weight:600}
+  .nav .badge{position:absolute;top:2px;right:50%;margin-right:-22px;background:var(--brand);
+    color:#fff;font-size:9px;padding:0 5px;border-radius:8px;font-weight:700;line-height:15px;min-width:15px}
+  .day{background:#fff;border-radius:16px;padding:14px 16px;margin-bottom:10px;
+    border:1px solid var(--line);box-shadow:var(--shadow)}
+  .day.done{border-color:var(--ok);background:linear-gradient(180deg,#f4fbf8,#fff)}
+  .day-top{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .day-no{width:36px;height:36px;border-radius:10px;flex:0 0 auto;background:#f2f3f5;color:var(--text2);
+    font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center}
+  .day.done .day-no{background:var(--ok);color:#fff}
+  .day-top .dl{flex:1}
+  .day-top .dl b{font-size:13.5px;display:block}
+  .day-top .dl span{font-size:11px;color:var(--text3)}
+  .task{display:flex;gap:9px;align-items:flex-start;padding:8px 0;font-size:13px;
+    cursor:pointer;border-bottom:1px dashed var(--line)}
+  .task:last-child{border-bottom:none}
+  .task .ck{width:19px;height:19px;border-radius:6px;flex:0 0 auto;margin-top:1px;
+    border:1.5px solid #d3d6db;background:#fff;display:flex;align-items:center;justify-content:center;
+    font-size:12px;color:#fff;transition:all .15s}
+  .task.checked .ck{background:var(--ok);border-color:var(--ok)}
+  .task.checked .tt{color:var(--text3);text-decoration:line-through}
+  /* ---- 错题本 ---- */
+  .wg{background:#fff;border-radius:16px;margin-bottom:12px;border:1px solid var(--line);
+    box-shadow:var(--shadow);overflow:hidden}
+  .wg-head{padding:12px 16px;display:flex;align-items:center;gap:8px;
+    background:#fafbfc;border-bottom:1px solid var(--line);cursor:pointer}
+  .wg-head .dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+  .wg-head b{font-size:13.5px;flex:1}
+  .wg-head .cnt{font-size:11px;color:var(--brand);background:var(--brand-soft);
+    padding:2px 8px;border-radius:8px;font-weight:600}
+  .wg-body{padding:12px 16px}
+  .wq{border-bottom:1px dashed var(--line);padding-bottom:12px;margin-bottom:12px}
+  .wq:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+  .wq .wqt{font-size:13.5px;font-weight:600;margin:0 0 8px;line-height:1.55}
+  .wq .mine{font-size:12px;color:var(--brand);margin:0 0 3px}
+  .wq .right{font-size:12px;color:var(--ok);margin:0 0 8px}
+  .wq .wexp{font-size:12px;color:var(--text2);background:#f7f8fa;border-radius:9px;
+    padding:8px 10px;line-height:1.6;margin:0 0 10px}
+  .wq .redo{background:var(--ok);color:#fff;border:none;border-radius:10px;padding:9px;
+    width:100%;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer}
+  .redo-area{margin-top:8px}
+  .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+  .stat{background:#fff;border-radius:16px;padding:16px;text-align:center;
+    border:1px solid var(--line);box-shadow:var(--shadow)}
+  .stat b{font-size:26px;color:var(--brand);display:block;line-height:1.2}
+  .stat span{font-size:11.5px;color:var(--text3)}
+  .rate{border-radius:16px;padding:16px;margin-bottom:12px;border:1px solid var(--line);
+    background:#fff;box-shadow:var(--shadow)}
+  .rate .rt{font-size:15px;font-weight:600;margin:0 0 8px}
+  .rate .rd{font-size:13px;color:var(--text2);line-height:1.7;margin:0}
+  .rate.good{background:linear-gradient(180deg,#f3fbf7,#fff);border-color:#bfe6d5}
+  .rate.mid{background:linear-gradient(180deg,#fdf9ef,#fff);border-color:#f0dcae}
+  .rate.bad{background:linear-gradient(180deg,#fdf1f0,#fff);border-color:#f5c8c4}
+  .empty{text-align:center;color:var(--text3);font-size:13px;padding:40px 0;line-height:1.8}
+  .hint{font-size:11.5px;color:var(--text3);line-height:1.6;margin-top:8px}
+  .fade-note{font-size:11px;color:var(--text3);text-align:center;margin-top:14px;line-height:1.6}
+  .admin-corner{position:fixed;right:12px;bottom:96px;z-index:55;background:#fff;
+    border:1px solid var(--line);border-radius:20px;padding:7px 13px;font-size:11px;
+    color:var(--text3);box-shadow:var(--shadow);text-decoration:none}
+  .loading{text-align:center;color:var(--text3);font-size:13px;padding:30px 0}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="logo">政</div>
+    <div>
+      <h1 id="appTitle">政史地学习</h1>
+      <p id="appSub">人教版 · 高一上</p>
+    </div>
+    <div class="streak" id="streakBox">🔥 连续 0 天</div>
+  </div>
+</div>
+
+<!-- 课程 -->
+<div class="screen active" id="scrCourse">
+  <div class="wrap">
+    <div class="card">
+      <h2 id="greet">今天想学哪一课？</h2>
+      <p class="sub">每课约 20~30 分钟：先看片 → 再看卡片 → 最后自测</p>
+      <div class="bar"><i id="totalBar" style="width:0%"></i></div>
+      <div style="font-size:11.5px;color:var(--text3)" id="totalTxt">加载中…</div>
+    </div>
+    <div id="courseList"><div class="loading">加载中…</div></div>
+  </div>
+</div>
+
+<!-- 详情 -->
+<div class="screen" id="scrDetail">
+  <div class="wrap">
+    <button class="back" onclick="go('scrCourse')">‹ 返回课程列表</button>
+    <div class="detail-head" id="dHead"></div>
+    <div class="tabs">
+      <button class="tab on" data-tab="pt" onclick="switchTab('pt')">复习要点</button>
+      <button class="tab" data-tab="vd" onclick="switchTab('vd')">看片清单</button>
+      <button class="tab" data-tab="qz" onclick="switchTab('qz')">自测练习</button>
+    </div>
+    <div id="tabPt"></div>
+    <div id="tabVd" style="display:none"></div>
+    <div id="tabQz" style="display:none"></div>
+  </div>
+</div>
+
+<!-- 计划 -->
+<div class="screen" id="scrPlan">
+  <div class="wrap">
+    <div class="card">
+      <h2>10 天启动计划</h2>
+      <p class="sub">每天 20~30 分钟 · 政治必修1 快速过一轮</p>
+      <div class="bar"><i id="planBar" style="width:0%"></i></div>
+      <div style="font-size:11.5px;color:var(--text3)" id="planTxt">加载中…</div>
+    </div>
+    <div id="planList"><div class="loading">加载中…</div></div>
+  </div>
+</div>
+
+<!-- 错题本 -->
+<div class="screen" id="scrWrong">
+  <div class="wrap">
+    <div class="card">
+      <h2>我的错题本</h2>
+      <p class="sub" id="wrongSub">做错的题会自动收进来，重做对了就自动移出</p>
+    </div>
+    <div id="wrongList"><div class="loading">加载中…</div></div>
+  </div>
+</div>
+
+<!-- 我的 -->
+<div class="screen" id="scrMe">
+  <div class="wrap">
+    <div class="stat-grid">
+      <div class="stat"><b id="mQuiz">0%</b><span>自测总正确率</span></div>
+      <div class="stat"><b id="mDays">0</b><span>连续学习天数</span></div>
+      <div class="stat"><b id="mDone">0</b><span>已完成任务</span></div>
+      <div class="stat"><b id="mAns">0</b><span>累计答题数</span></div>
+    </div>
+    <div id="rateBox"></div>
+    <div class="card">
+      <h2>学习建议</h2>
+      <p class="sub" id="adviceTxt">做满 10 道题后这里会给出针对性建议。</p>
+    </div>
+    <p class="fade-note">学习记录已同步到服务器，家长可查看</p>
+  </div>
+</div>
+
+<a class="admin-corner" href="/admin">家长入口 ›</a>
+
+<div class="navbar">
+  <button class="nav on" data-scr="scrCourse" onclick="go('scrCourse')"><span class="ni">📚</span>课程</button>
+  <button class="nav" data-scr="scrPlan" onclick="go('scrPlan')"><span class="ni">📅</span>计划</button>
+  <button class="nav" data-scr="scrWrong" onclick="go('scrWrong')"><span class="ni">📕</span>错题本<span id="wBadge" class="badge" style="display:none">0</span></button>
+  <button class="nav" data-scr="scrMe" onclick="go('scrMe')"><span class="ni">📊</span>我的</button>
+</div>
+
+<script>
+/* ================= 状态 ================= */
+let COURSES = [];      // 课程列表
+let CUR = null;        // 当前课程详情
+let SESSION_ID = null; // 学习会话
+let WRONG = [];        // 错题分组
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+/* ================= 会话计时 ================= */
+async function startSession(page){
+  try{
+    const r = await fetch("/api/session/start",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify({page})});
+    const d = await r.json(); SESSION_ID = d.sessionId;
+  }catch(e){}
+}
+function endSession(){
+  if(!SESSION_ID) return;
+  const data = JSON.stringify({sessionId:SESSION_ID});
+  if(navigator.sendBeacon){
+    navigator.sendBeacon("/api/session/end", new Blob([data],{type:"application/json"}));
+  }else{
+    fetch("/api/session/end",{method:"POST",headers:{"Content-Type":"application/json"},body:data});
+  }
+  SESSION_ID = null;
+}
+window.addEventListener("pagehide", endSession);
+window.addEventListener("beforeunload", endSession);
+/* 页面重新可见时若会话已结束则重启，保证时长统计连续 */
+document.addEventListener("visibilitychange", ()=>{
+  if(!document.hidden && !SESSION_ID){ startSession(location.hash||"course"); }
+});
+
+/* ================= 导航 ================= */
+function go(scr){
+  document.querySelectorAll(".screen").forEach(e=>e.classList.remove("active"));
+  $(scr).classList.add("active");
+  document.querySelectorAll(".nav").forEach(n=>n.classList.toggle("on", n.dataset.scr===scr));
+  location.hash = scr;
+  window.scrollTo(0,0);
+  if(scr==="scrWrong") loadWrong();
+  if(scr==="scrMe") loadMe();
+}
+
+/* ================= 课程列表 ================= */
+async function loadCourses(){
+  const r = await fetch("/api/courses");
+  const d = await r.json();
+  COURSES = d.courses;
+  $("streakBox").textContent = "🔥 连续 " + (d.streak||0) + " 天";
+  $("greet").textContent = d.studentName ? d.studentName + "，今天想学哪一课？" : "今天想学哪一课？";
+
+  $("courseList").innerHTML = COURSES.map(c=>`
+    <div class="course-item" onclick="openCourse('${c.id}')">
+      <div class="course-badge" style="background:${c.color}">${c.no.replace(/[第课\s]/g,"")}</div>
+      <div class="course-info">
+        <p class="ct">${esc(c.title)}</p>
+        <p class="cs">${esc(c.subtitle)}</p>
+      </div>
+      <div class="course-prog"><b>${c.right}/${c.quizCount}</b>已答对</div>
+      <div class="arrow">›</div>
+    </div>`).join("");
+
+  const tAll = COURSES.reduce((s,c)=>s+c.quizCount,0);
+  const rAll = COURSES.reduce((s,c)=>s+c.right,0);
+  const p = tAll?Math.round(rAll/tAll*100):0;
+  $("totalBar").style.width = p+"%";
+  $("totalTxt").textContent = `总进度 ${p}%（已答对 ${rAll} / ${tAll} 题）`;
+  updateWrongBadge(d.stats.wrong_count||0);
+}
+
+function updateWrongBadge(n){
+  const b = $("wBadge");
+  if(n>0){ b.style.display="inline-block"; b.textContent=n; }
+  else b.style.display="none";
+}
+
+/* ================= 课程详情 ================= */
+async function openCourse(cid){
+  const r = await fetch("/api/course/"+cid);
+  CUR = await r.json();
+  const c = CUR;
+  $("dHead").style.background = `linear-gradient(135deg,${c.color},${shade(c.color,-18)})`;
+  $("dHead").innerHTML = `<p class="dh-no">${esc(c.no)}</p>
+    <h2>${esc(c.title)}</h2><p class="dh-sub">${esc(c.subtitle)}</p>`;
+  renderPoints(c); renderVideos(c); renderQuiz(c);
+  switchTab("pt", true);
+  go("scrDetail");
+}
+function shade(hex,pct){
+  const n=parseInt(hex.slice(1),16);
+  let r=(n>>16)&255,g=(n>>8)&255,b=n&255;
+  r=Math.max(0,Math.min(255,r+Math.round(255*pct/100)));
+  g=Math.max(0,Math.min(255,g+Math.round(255*pct/100)));
+  b=Math.max(0,Math.min(255,b+Math.round(255*pct/100)));
+  return "#"+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
+}
+function switchTab(t,silent){
+  document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("on",b.dataset.tab===t));
+  $("tabPt").style.display = t==="pt"?"block":"none";
+  $("tabVd").style.display = t==="vd"?"block":"none";
+  $("tabQz").style.display = t==="qz"?"block":"none";
+  if(!silent) window.scrollTo(0,0);
+}
+
+function renderPoints(c){
+  $("tabPt").innerHTML = c.points.map(p=>`
+    <div class="pt"><h3>${esc(p.head)}</h3>
+      <div class="body">${p.body}</div>
+      <div class="tip">💡 ${esc(p.tip)}</div>
+    </div>`).join("") +
+    `<div class="card" style="margin-top:14px"><h2>怎么用这几张卡？</h2>
+      <p class="sub" style="margin:0">不要背！先读一遍，合上屏幕，用自己的话说出"这一条讲什么"。说不出来，再读一遍。读三遍胜过背一遍。</p></div>`;
+}
+
+/* ================= 视频（含优先级 + 时间戳） ================= */
+const LVL_CLASS = {"必看":"must","选看":"may","补充":"extra"};
+const LVL_ORDER = {"必看":0,"选看":1,"补充":2};
+function renderVideos(c){
+  const ord = lv => (lv in LVL_ORDER) ? LVL_ORDER[lv] : 9;
+  const vids = [...c.videos].sort((a,b)=>ord(a.level)-ord(b.level));
+  $("tabVd").innerHTML =
+    `<div class="card" id="vidLegend"><h2>按优先级看，不用全看</h2>
+      <p class="sub" style="margin:0">
+        <span class="lvl must">必看</span> 先看这些，时间紧时只看这几条<br>
+        <span class="lvl may">选看</span> 有时间再看，加深理解<br>
+        <span class="lvl extra">补充</span> 考前或闲时看，可跳过
+      </p></div>` +
+    vids.map((v,i)=>`
+      <div class="vid ${LVL_CLASS[v.level]}">
+        <div class="vtop">
+          <span class="lvl ${LVL_CLASS[v.level]}">${esc(v.level)}</span>
+          <span class="vtag">${esc(v.type)}</span>
+          <span class="vname">${esc(v.name)}</span>
+        </div>
+        <p class="vnote">${esc(v.note)}</p>
+        ${v.seg?`<div class="vseg">⏱ ${esc(v.seg)}</div>`:""}
+        <p class="vcov">对应知识点：${esc(v.covers)} · 约 ${v.minutes} 分钟</p>
+        <button onclick="watchVideo('${c.id}','${esc(v.name)}','${encodeURIComponent(v.kw)}')">▶ 去观看（记录观看）</button>
+      </div>`).join("") +
+    `<div class="card" style="margin-top:14px"><h2>看片规则</h2>
+      <p class="sub" style="margin:0">看完用<b>一句话</b>说出"这段讲的是哪一课、哪个知识点"。说不出来就拖回去重看。优先看标"必看"的，其余可跳过。</p></div>`;
+}
+
+async function watchVideo(cid,name,kw){
+  // 记录观看
+  try{
+    await fetch("/api/video/view",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({courseId:cid,videoName:name})});
+  }catch(e){}
+  // 跳转 B 站搜索
+  const url = "https://search.bilibili.com/all?keyword="+decodeURIComponent(kw);
+  window.open(url,"_blank");
+}
+
+/* ================= 自测 ================= */
+function renderQuiz(c){
+  const mine = c.myAnswers || {};
+  $("tabQz").innerHTML = c.quiz.map((q,i)=>{
+    const rec = mine[String(i)];
+    const done = !!rec;
+    return `<div class="qbox" id="q_${i}" ${done?'data-locked="1"':""}>
+      <div class="qnum">第 ${i+1} 题 / ${c.quiz.length}</div>
+      <p class="qtxt">${esc(q.q)}</p>
+      ${q.o.map((o,j)=>{
+        let cls = "opt";
+        if(done){
+          cls += " locked";
+          if(j===q.a) cls += " right";
+          else if(j===rec.chosen) cls += " wrong";
+        }
+        return `<div class="${cls}" ${done?"":`onclick="answer(${i},${j})"`}>
+          <span class="key">${"ABCD"[j]}</span><span>${esc(o)}</span>
+        </div>`;
+      }).join("")}
+      <div class="exp ${done?"show":""}" id="e_${i}">${done
+        ? (rec.correct?"✅ 答对了！":"❌ 答错了。") + "<b>解析：</b>" + esc(q.e)
+        : ""}</div>
+    </div>`;
+  }).join("") +
+    `<button class="btn ghost" style="margin-top:6px" onclick="resetQuiz()">重新作答本课（清空本课记录）</button>
+     <p class="hint">答错的题会自动进入「错题本」，可在底部导航查看。</p>`;
+}
+
+async function resetQuiz(){
+  if(!confirm("确定要清空本课的作答记录吗？")) return;
+  await fetch("/api/course/reset",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({courseId:CUR.id})});
+  const r = await fetch("/api/course/"+CUR.id);
+  CUR = await r.json();
+  renderQuiz(CUR);
+  loadCourses();
+}
+
+async function answer(qi,choice){
+  const box = $("q_"+qi);
+  if(box.dataset.locked) return;
+  box.dataset.locked = "1";
+  const r = await fetch("/api/answer",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({courseId:CUR.id,questionIdx:qi,chosen:choice})});
+  const d = await r.json();
+  const opts = box.querySelectorAll(".opt");
+  opts.forEach((o,j)=>{
+    o.classList.add("locked"); o.removeAttribute("onclick");
+    if(j===d.answer) o.classList.add("right");
+    else if(j===choice) o.classList.add("wrong");
+  });
+  const e = $("e_"+qi);
+  e.classList.add("show");
+  e.innerHTML = (d.correct?"✅ 答对了！":"❌ 答错了。") + "<b>解析：</b>" + esc(d.explain);
+  loadCourses();
+}
+
+/* ================= 计划 ================= */
+async function loadPlan(){
+  const r = await fetch("/api/plan");
+  const d = await r.json();
+  const done = d.done || {};
+  let totalTasks=0, doneTasks=0;
+  $("planList").innerHTML = d.plan.map(p=>{
+    const marks = done[String(p.day)] || {};
+    const allDone = p.tasks.every((t,i)=>marks[String(i)]);
+    totalTasks += p.tasks.length;
+    return `<div class="day ${allDone?"done":""}">
+      <div class="day-top">
+        <div class="day-no">D${p.day}</div>
+        <div class="dl"><b>${esc(p.cname)}</b><span>${p.tasks.length} 项任务 · 约 25 分钟</span></div>
+      </div>
+      ${p.tasks.map((t,i)=>`
+        <div class="task ${marks[String(i)]?"checked":""}" onclick="toggleTask(${p.day},${i},${marks[String(i)]?0:1})">
+          <span class="ck">✓</span><span class="tt">${esc(t)}</span>
+        </div>`).join("")}
+    </div>`;
+  }).join("");
+  Object.values(done).forEach(m=>Object.values(m).forEach(v=>{ if(v) doneTasks++; }));
+  const pct = totalTasks?Math.round(doneTasks/totalTasks*100):0;
+  $("planBar").style.width = pct+"%";
+  $("planTxt").textContent = `已完成 ${doneTasks} / ${totalTasks} 项（${pct}%）`;
+}
+
+async function toggleTask(day,idx,done){
+  await fetch("/api/plan/toggle",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({day,taskIdx:idx,done:!!done})});
+  loadPlan();
+}
+
+/* ================= 错题本 ================= */
+async function loadWrong(){
+  const r = await fetch("/api/wrongbook");
+  const d = await r.json();
+  updateWrongBadge(d.total);
+  if(!d.groups.length){
+    $("wrongList").innerHTML = `<div class="empty">🎉 错题本是空的<br><span style="font-size:12px">继续加油，做错的题会自动出现在这里</span></div>`;
+    $("wrongSub").textContent = "暂无错题";
+    return;
+  }
+  $("wrongSub").textContent = `共 ${d.total} 道错题，重做对了会自动移出`;
+  $("wrongList").innerHTML = d.groups.map(g=>`
+    <div class="wg">
+      <div class="wg-head">
+        <span class="dot" style="background:${g.color}"></span>
+        <b>${esc(g.no)} ${esc(g.title)}</b>
+        <span class="cnt">${g.items.length} 题</span>
+      </div>
+      <div class="wg-body">
+        ${g.items.map(it=>`
+          <div class="wq">
+            <p class="wqt">${esc(it.q)}</p>
+            <p class="mine">你选的是：${"ABCD"[it.myAnswer]}． ${esc(it.o[it.myAnswer]||"")}</p>
+            <p class="right">正确答案：${"ABCD"[it.answer]}． ${esc(it.o[it.answer])}</p>
+            <p class="wexp">💡 ${esc(it.explain)}</p>
+            <button class="redo" onclick="redo('${g.courseId}',${it.questionIdx},this)">重做这道题</button>
+            <div class="redo-area"></div>
+          </div>`).join("")}
+      </div>
+    </div>`).join("");
+}
+
+async function redo(cid,qi,btn){
+  const item = btn.closest(".wq");
+  const area = item.querySelector(".redo-area");
+  const c = await (await fetch("/api/course/"+cid)).json();
+  const q = c.quiz[qi];
+  area.innerHTML = `<div style="margin-top:10px">
+      <p style="font-size:12px;color:var(--text3);margin:0 0 8px">请重新选择答案：</p>
+      ${q.o.map((o,j)=>`<div class="opt" onclick="redoPick('${cid}',${qi},${j},this)">
+        <span class="key">${"ABCD"[j]}</span><span>${esc(o)}</span></div>`).join("")}
+      <div class="exp"></div>
+    </div>`;
+  btn.style.display = "none";
+}
+
+async function redoPick(cid,qi,choice,el){
+  const area = el.parentElement;
+  area.querySelectorAll(".opt").forEach(o=>{o.classList.add("locked");o.removeAttribute("onclick");});
+  const r = await fetch("/api/redo",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({courseId:cid,questionIdx:qi,chosen:choice})});
+  const d = await r.json();
+  const opts = area.querySelectorAll(".opt");
+  opts.forEach((o,j)=>{
+    if(j===d.answer) o.classList.add("right");
+    else if(j===choice) o.classList.add("wrong");
+  });
+  const e = area.querySelector(".exp");
+  e.classList.add("show");
+  e.innerHTML = (d.correct?"✅ 答对了！已从错题本移除":"❌ 又错了，再看看解析") +
+    "<b>解析：</b>" + esc(d.explain);
+  setTimeout(loadWrong, d.correct?1200:2200);
+  loadCourses();
+}
+
+/* ================= 我的 ================= */
+async function loadMe(){
+  const r = await fetch("/api/courses");
+  const d = await r.json();
+  const s = d.stats;
+  $("mQuiz").textContent = s.rate + "%";
+  $("mAns").textContent = s.total;
+  $("streakBox").textContent = "🔥 连续 " + (d.streak||0) + " 天";
+  $("mDays").textContent = d.streak || 0;
+
+  const pr = await (await fetch("/api/plan")).json();
+  let dn=0; Object.values(pr.done||{}).forEach(m=>Object.values(m).forEach(v=>{if(v)dn++;}));
+  $("mDone").textContent = dn;
+
+  let cls,title,desc;
+  if(s.total<10){cls="mid";title="先动起来 🚀";
+    desc="还没足够数据。先去做几道题，做满 10 道后这里会给出针对性评价。";}
+  else if(s.rate>=85){cls="good";title="掌握良好 👍";
+    desc=`正确率 ${s.rate}%，基础扎实。建议转入"材料题审题训练"，重点练'题目问什么'。`;}
+  else if(s.rate>=65){cls="mid";title="基础尚可 🟡";
+    desc=`正确率 ${s.rate}%。看看错题集中在哪一课，重点重读那一课的知识卡，再重做错题。`;}
+  else {cls="bad";title="需要补基础 🔴";
+    desc=`正确率 ${s.rate}%。先别急着刷题——回到知识卡，每课 8 条按顺序读三遍，合上屏幕口头复述。`;}
+  $("rateBox").innerHTML = `<div class="rate ${cls}">
+    <p class="rt">本阶段评价：${title}</p><p class="rd">${desc}</p></div>`;
+
+  if(s.total>=10){
+    let bd="";
+    COURSES.forEach(c=>{
+      if(!c.answered) return;
+      const cp = Math.round(c.right/c.answered*100);
+      bd += `<div style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;font-size:12.5px">
+          <span>${esc(c.no)}</span>
+          <span style="color:${cp>=80?"var(--ok)":cp>=60?"var(--warn)":"var(--brand)"}">${c.right}/${c.answered}</span>
+        </div><div class="bar"><i style="width:${cp}%;background:${c.color}"></i></div></div>`;
+    });
+    $("adviceTxt").innerHTML = bd + `<div style="margin-top:12px;color:var(--text2)">${desc}</div>`;
+  } else {
+    $("adviceTxt").textContent = "做满 10 道题后，这里会按每课显示掌握情况并给出建议。";
+  }
+}
+
+/* ================= 初始化 ================= */
+(async function(){
+  await startSession("course");
+  await loadCourses();
+  await loadPlan();
+  const h = (location.hash||"").replace("#","");
+  if(h && $(h)) go(h);
+})();
+</script>
+</body>
+</html>

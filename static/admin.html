@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>家长端 · 学习看板</title>
+<style>
+  :root{
+    --bg:#f5f6f8;--card:#fff;--text:#1f2329;--text2:#646a73;--text3:#8f959e;
+    --line:#eceef1;--brand:#2b5cd9;--brand-soft:#eaf0fd;
+    --ok:#2f9e6e;--ok-soft:#e8f6f0;--warn:#e8a33d;--warn-soft:#fdf8ef;
+    --red:#e8524a;--red-soft:#fdeceb;
+    --radius:16px;--shadow:0 2px 12px rgba(0,0,0,.05);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+    background:var(--bg);color:var(--text);font-size:14px;line-height:1.6}
+  .wrap{max-width:860px;margin:0 auto;padding:20px 16px 60px}
+  /* 登录 */
+  #login{max-width:360px;margin:14vh auto 0;padding:0 20px}
+  .login-card{background:#fff;border-radius:20px;padding:28px 24px;
+    box-shadow:0 8px 30px rgba(0,0,0,.08);border:1px solid var(--line);text-align:center}
+  .login-card .ic{width:54px;height:54px;border-radius:16px;margin:0 auto 14px;
+    background:linear-gradient(135deg,#2b5cd9,#4a7ee8);color:#fff;font-size:24px;
+    display:flex;align-items:center;justify-content:center}
+  .login-card h1{font-size:18px;margin:0 0 4px}
+  .login-card p{font-size:12px;color:var(--text3);margin:0 0 20px}
+  .login-card input{width:100%;padding:12px 14px;border:1.5px solid var(--line);border-radius:12px;
+    font-size:15px;font-family:inherit;outline:none;text-align:center;letter-spacing:3px}
+  .login-card input:focus{border-color:var(--brand)}
+  .login-card button{width:100%;padding:12px;margin-top:12px;border:none;border-radius:12px;
+    background:var(--brand);color:#fff;font-size:15px;font-weight:600;font-family:inherit;cursor:pointer}
+  .login-err{color:var(--red);font-size:12px;margin-top:10px;min-height:16px}
+  .login-tip{font-size:11px;color:var(--text3);margin-top:16px;line-height:1.6}
+  .back-link{display:inline-block;margin-top:14px;font-size:12px;color:var(--text2);text-decoration:none}
+  /* 看板 */
+  .head{display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap}
+  .head h1{font-size:19px;margin:0;font-weight:700}
+  .head .sub{font-size:12px;color:var(--text3)}
+  .head .right{margin-left:auto;display:flex;gap:8px}
+  .btn-sm{padding:7px 14px;border-radius:10px;border:1px solid var(--line);background:#fff;
+    font-size:12.5px;font-family:inherit;cursor:pointer;color:var(--text2)}
+  .btn-sm.pri{background:var(--brand);color:#fff;border-color:var(--brand)}
+  .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+  @media(max-width:640px){.grid4{grid-template-columns:repeat(2,1fr)}}
+  .stat{background:#fff;border-radius:var(--radius);padding:16px;border:1px solid var(--line);
+    box-shadow:var(--shadow)}
+  .stat b{font-size:26px;color:var(--brand);display:block;line-height:1.25}
+  .stat b.g{color:var(--ok)}.stat b.r{color:var(--red)}.stat b.w{color:var(--warn)}
+  .stat span{font-size:11.5px;color:var(--text3)}
+  .panel{background:#fff;border-radius:var(--radius);padding:18px;margin-bottom:14px;
+    border:1px solid var(--line);box-shadow:var(--shadow)}
+  .panel h2{font-size:15px;margin:0 0 14px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .panel h2 .tag{font-size:10.5px;background:var(--brand-soft);color:var(--brand);
+    padding:2px 8px;border-radius:8px;font-weight:600}
+  /* 柱状图 */
+  .chart{display:flex;align-items:flex-end;gap:8px;height:130px;padding:0 2px}
+  .bar-col{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;
+    justify-content:flex-end}
+  .bar-v{font-size:10.5px;color:var(--text2);font-weight:600}
+  .bar-r{width:100%;max-width:38px;background:linear-gradient(180deg,#4a7ee8,#2b5cd9);
+    border-radius:6px 6px 3px 3px;min-height:3px;transition:height .5s}
+  .bar-r.zero{background:#e6e8eb}
+  .bar-d{font-size:10.5px;color:var(--text3)}
+  .empty{color:var(--text3);font-size:13px;text-align:center;padding:26px 0;line-height:1.8}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;font-size:11.5px;color:var(--text3);font-weight:600;
+    padding:8px 6px;border-bottom:1px solid var(--line)}
+  td{padding:10px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  .mini-bar{height:6px;background:var(--line);border-radius:4px;overflow:hidden;min-width:60px}
+  .mini-bar i{display:block;height:100%;border-radius:4px}
+  .pill{display:inline-block;font-size:10.5px;padding:2px 8px;border-radius:8px;
+    background:#f2f3f5;color:var(--text2)}
+  .pill.ok{background:var(--ok-soft);color:var(--ok)}
+  .pill.warn{background:var(--warn-soft);color:var(--warn)}
+  .pill.bad{background:var(--red-soft);color:var(--red)}
+  .cfg-row{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .cfg-row label{font-size:13px;color:var(--text2);min-width:88px}
+  .cfg-row input{padding:9px 12px;border:1.5px solid var(--line);border-radius:10px;
+    font-size:13.5px;font-family:inherit;outline:none;flex:1;min-width:120px;max-width:240px}
+  .cfg-row input:focus{border-color:var(--brand)}
+  .saved{color:var(--ok);font-size:12px}
+  .note{font-size:11.5px;color:var(--text3);line-height:1.65;margin-top:10px}
+</style>
+</head>
+<body>
+
+<!-- ============ 登录 ============ -->
+<div id="login">
+  <div class="login-card">
+    <div class="ic">👨‍👩‍👧</div>
+    <h1>家长端</h1>
+    <p>请输入管理密码查看学习情况</p>
+    <input type="password" id="pwd" placeholder="密码" onkeydown="if(event.key==='Enter')doLogin()">
+    <button onclick="doLogin()">进入看板</button>
+    <div class="login-err" id="err"></div>
+    <p class="login-tip">默认为适应期密码 888888<br>如需修改，可在看板底部「设置」中更改</p>
+    <a class="back-link" href="/">‹ 返回学生端</a>
+  </div>
+</div>
+
+<!-- ============ 看板 ============ -->
+<div id="board" style="display:none">
+<div class="wrap">
+  <div class="head">
+    <div>
+      <h1 id="bTitle">学习看板</h1>
+      <div class="sub" id="bSub">最近 7 天学习情况</div>
+    </div>
+    <div class="right">
+      <button class="btn-sm" onclick="refresh()">刷新</button>
+      <button class="btn-sm" onclick="logout()">退出</button>
+    </div>
+  </div>
+
+  <div class="grid4" id="statCards"></div>
+
+  <div class="panel">
+    <h2>近 7 天学习时长 <span class="tag">分钟</span></h2>
+    <div id="chartBox"></div>
+    <p class="note">说明：时长为「打开学习页面的停留时间」估算，单次上限 2 小时，用于判断学习投入度，非精确计时。</p>
+  </div>
+
+  <div class="panel">
+    <h2>各课掌握情况</h2>
+    <div id="courseTable"></div>
+  </div>
+
+  <div class="panel">
+    <h2>每日计划完成度</h2>
+    <div id="taskBox"></div>
+  </div>
+
+  <div class="panel">
+    <h2>视频观看记录</h2>
+    <div id="videoBox"></div>
+  </div>
+
+  <div class="panel">
+    <h2>设置</h2>
+    <div class="cfg-row">
+      <label>学生称呼</label>
+      <input id="cfgName" placeholder="如：小明">
+      <button class="btn-sm pri" onclick="saveCfg()">保存</button>
+    </div>
+    <div class="cfg-row">
+      <label>每日目标(分)</label>
+      <input id="cfgTarget" type="number" placeholder="25">
+    </div>
+    <div class="cfg-row">
+      <label>修改密码</label>
+      <input id="cfgPwd" type="password" placeholder="留空则不修改">
+    </div>
+    <div class="cfg-row">
+      <button class="btn-sm pri" onclick="saveCfg()">保存全部设置</button>
+      <span class="saved" id="cfgSaved"></span>
+    </div>
+  </div>
+
+  <p class="note" style="text-align:center">数据来源：学生端在浏览器中的学习记录 · 自动同步至服务器</p>
+</div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+/* ---------- 登录 ---------- */
+async function doLogin(){
+  const pwd = $("pwd").value.trim();
+  const r = await fetch("/api/admin/login",{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify({password:pwd})});
+  const d = await r.json();
+  if(d.ok){
+    $("login").style.display="none";
+    $("board").style.display="block";
+    loadBoard();
+  }else{
+    $("err").textContent = d.msg || "密码错误，请重试";
+    $("pwd").value="";
+  }
+}
+async function logout(){
+  await fetch("/api/admin/logout",{method:"POST"});
+  location.reload();
+}
+
+/* ---------- 看板 ---------- */
+let DATA = null;
+async function loadBoard(){
+  const r = await fetch("/api/admin/dashboard");
+  if(r.status===401){ $("login").style.display="block"; $("board").style.display="none"; return; }
+  DATA = await r.json();
+  render();
+}
+function refresh(){ loadBoard(); }
+
+function render(){
+  const d = DATA;
+  $("bTitle").textContent = (d.studentName||"同学") + " 的学习看板";
+
+  const s = d.stats;
+  const week = d.studyTime.reduce((a,b)=>a+b.minutes,0);
+  const today = new Date().toISOString().slice(0,10);
+  const todayRow = d.studyTime.find(x=>x.date===today) || {};
+  const todayDisp = todayRow.display || "0分";
+  const target = d.dailyTarget || 25;
+
+  $("statCards").innerHTML = `
+    <div class="stat"><b class="g">${s.rate}%</b><span>答题正确率（${s.right}/${s.total}）</span></div>
+    <div class="stat"><b class="r">${s.wrong_count}</b><span>当前错题数</span></div>
+    <div class="stat"><b class="w">${todayDisp}</b><span>今日学习 · 目标 ${target} 分</span></div>
+    <div class="stat"><b>${d.streak}</b><span>连续学习天数</span></div>`;
+
+  /* 时长柱状图 */
+  const days = d.studyTime;
+  if(!days.length){
+    $("chartBox").innerHTML = `<div class="empty">暂无学习记录<br><span style="font-size:12px">学生在学生端开始学习后，这里会显示数据</span></div>`;
+  }else{
+    const max = Math.max(...days.map(x=>x.minutes), target, 1);
+    $("chartBox").innerHTML = `<div class="chart">` + days.map(x=>{
+      const h = Math.max(3, Math.round(x.minutes/max*100));
+      const mm = String(x.date).slice(5);
+      return `<div class="bar-col">
+        <div class="bar-v">${x.minutes||x.display}</div>
+        <div class="bar-r ${x.minutes===0?"zero":""}" style="height:${h}%"></div>
+        <div class="bar-d">${mm}</div>
+      </div>`;
+    }).join("") + `</div>`;
+  }
+
+  /* 各课掌握 */
+  if(!d.byCourse.length){
+    $("courseTable").innerHTML = `<div class="empty">还没有答题记录</div>`;
+  }else{
+    $("courseTable").innerHTML = `<table>
+      <tr><th>课程</th><th style="width:90px">答题</th><th style="width:150px">正确率</th></tr>
+      ${d.byCourse.map(c=>{
+        const cls = c.rate>=80?"ok":c.rate>=60?"warn":"bad";
+        return `<tr>
+          <td><span class="pill" style="background:${c.color}1a;color:${c.color}">${esc(c.no)}</span>
+            <span style="font-size:12.5px">${esc(c.title.slice(0,14))}${c.title.length>14?"…":""}</span></td>
+          <td style="font-size:12.5px;color:var(--text2)">${c.right}/${c.total}</td>
+          <td><div style="display:flex;align-items:center;gap:8px">
+            <div class="mini-bar"><i style="width:${c.rate}%;background:${c.color}"></i></div>
+            <span class="pill ${cls}">${c.rate}%</span>
+          </div></td></tr>`;
+      }).join("")}</table>`;
+  }
+
+  /* 任务 */
+  const t = d.tasks;
+  const pct = t.total?Math.round(t.done/t.total*100):0;
+  $("taskBox").innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+      <div class="mini-bar" style="flex:1;height:9px"><i style="width:${pct}%;background:var(--brand)"></i></div>
+      <span style="font-size:13px;font-weight:600">${t.done} / ${t.total}（${pct}%）</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      ${Object.keys(t.detail||{}).sort((a,b)=>a-b).map(day=>{
+        const marks = t.detail[day]||{};
+        const n = Object.values(marks).filter(v=>v).length;
+        return `<span class="pill ${n>0?"ok":""}">第${day}天 ${n}项</span>`;
+      }).join("") || '<span style="font-size:12px;color:var(--text3)">暂无打卡记录</span>'}
+    </div>`;
+
+  /* 视频 */
+  if(!d.videos.length){
+    $("videoBox").innerHTML = `<div class="empty">暂无视频观看记录</div>`;
+  }else{
+    $("videoBox").innerHTML = `<table>
+      <tr><th>视频</th><th style="width:70px">次数</th><th style="width:130px">最近观看</th></tr>
+      ${d.videos.map(v=>`<tr>
+        <td style="font-size:12.5px">${esc(v.video_name)}</td>
+        <td style="font-size:12.5px">${v.times} 次</td>
+        <td style="font-size:11.5px;color:var(--text3)">${esc(String(v.last_at).replace("T"," ").slice(0,16))}</td>
+      </tr>`).join("")}</table>`;
+  }
+
+  /* 配置 */
+  fetch("/api/admin/config").then(r=>r.json()).then(c=>{
+    $("cfgName").value = c.studentName||"";
+    $("cfgTarget").value = c.dailyTarget||25;
+  });
+}
+
+async function saveCfg(){
+  const body = {
+    studentName: $("cfgName").value.trim(),
+    dailyTarget: $("cfgTarget").value.trim()
+  };
+  const np = $("cfgPwd").value.trim();
+  if(np) body.newPassword = np;
+  const r = await fetch("/api/admin/config",{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(r.ok){
+    $("cfgSaved").textContent = "✓ 已保存";
+    $("cfgPwd").value = "";
+    setTimeout(()=>$("cfgSaved").textContent="",2500);
+    loadBoard();
+  }
+}
+
+/* ---------- 初始化 ---------- */
+(async function(){
+  const r = await fetch("/api/admin/check");
+  const d = await r.json();
+  if(d.loggedIn){
+    $("login").style.display="none";
+    $("board").style.display="block";
+    loadBoard();
+  }
+})();
+</script>
+</body>
+</html>

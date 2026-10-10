@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: zsd-study
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --chdir app --workers 1 --threads 4 --timeout 60 --bind 0.0.0.0:$PORT server:app
+    envVars:
+      - key: TURSO_URL
+        sync: false
+      - key: TURSO_TOKEN
+        sync: false
+      - key: PYTHON_VERSION
+        value: "3.11.0"
