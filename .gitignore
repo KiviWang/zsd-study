@@ -1,5 +1,8 @@
 __pycache__/
 *.pyc
 data/*.db
+data/*.sqlite3
 .venv/
 venv/
+*.log
+.DS_Store

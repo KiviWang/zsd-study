@@ -14,7 +14,11 @@ import requests
 from datetime import datetime, date, timedelta
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SQLITE_PATH = os.path.join(BASE, "data", "study.db")
+# 本地 SQLite 位置：
+#   默认 <项目>/data/study.db
+#   可用环境变量 ZSD_SQLITE_DIR 覆盖（PythonAnywhere 部署时指向可持久化目录）
+_SQLITE_DIR = os.environ.get("ZSD_SQLITE_DIR") or os.path.join(BASE, "data")
+SQLITE_PATH = os.path.join(_SQLITE_DIR, "study.db")
 
 TURSO_URL = os.environ.get("TURSO_URL", "").rstrip("/")
 TURSO_TOKEN = os.environ.get("TURSO_TOKEN", "")

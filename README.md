@@ -25,14 +25,30 @@ python3 app/server.py
 
 访问 `http://127.0.0.1:5000`（学生端）或 `http://127.0.0.1:5000/admin`（家长端）。
 
-## 部署到 Render（免费）
+## 部署（免费方案）
 
-本项目已配置 `render.yaml`，可直接部署：
+推荐 **PythonAnywhere 免费版**：不需要信用卡、不休眠、支持 Turso 云数据库。
+（`turso.io` / `turso.tech` 已在 PythonAnywhere 免费版的外网允许列表内。）
 
-1. 把代码推送到 GitHub 仓库
-2. 在 Render 新建 Blueprint，选择该仓库
-3. 填入环境变量 `TURSO_URL` 和 `TURSO_TOKEN`
-4. 部署完成后即可通过分配的网址访问
+部署要点：
+
+1. 注册 PythonAnywhere Beginner 账号
+2. 创建 Turso 云数据库，拿到 `URL`（`libsql://` 改 `https://`）和 `Token`
+3. 用 Bash 控制台从 GitHub 拉取代码，创建虚拟环境并 `pip install -r requirements.txt`
+4. Web 标签页 → Add a new web app → **Manual configuration** → 选一致的 Python 版本
+5. 设置 Virtualenv 路径
+6. 编辑 WSGI 文件，内容替换为：
+   ```python
+   import sys
+   sys.path.insert(0, '/home/你的用户名/zsd-study')
+   from wsgi import application
+   ```
+7. 在 Environment variables 里加 `TURSO_URL`、`TURSO_TOKEN`
+8. 点 **Reload**
+
+> 注意：免费版**不要**写 `app.run()`（会导致 504/502）；每 30 天需登录一次续期。
+
+也可用 Render 免费版（已附带 `render.yaml`），但 Render 要求绑定信用卡。
 
 详见 `部署说明.md`。
 
@@ -60,7 +76,8 @@ Turso 通过 HTTP API 调用，不依赖额外第三方库。
 │   └── admin.html     # 家长端
 ├── data/              # 本地数据库目录
 ├── requirements.txt
-├── render.yaml        # Render 部署配置
+├── wsgi.py            # PythonAnywhere WSGI 入口
+├── render.yaml        # Render 部署配置（备选）
 └── 部署说明.md
 ```
 
