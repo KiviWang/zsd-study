@@ -56,20 +56,26 @@ def _turso_pipeline(statements):
 
     out = []
     for item in data.get("results", []):
+        # 错误响应：把完整内容抛出，便于定位（SQL错误/认证失败等）
         if item.get("type") == "error":
             raise RuntimeError("Turso error: " + json.dumps(item, ensure_ascii=False))
-        if "response" in item:
-            r = item["response"]["result"]
-            cols = [c.get("name") for c in r.get("cols", [])]
-            rows = []
-            for row in r.get("rows", []):
-                rows.append({cols[i]: _from_arg(cell) for i, cell in enumerate(row)})
-            out.append({
-                "cols": cols,
-                "rows": rows,
-                "affected": r.get("affected_row_count", 0),
-                "last_id": r.get("last_insert_rowid"),
-            })
+        resp = item.get("response") or {}
+        # 跳过 close 等非 execute 响应（它们没有 result 字段）
+        if resp.get("type") != "execute":
+            continue
+        if resp.get("type") == "error" or "result" not in resp:
+            raise RuntimeError("Turso error: " + json.dumps(item, ensure_ascii=False))
+        r = resp.get("result") or {}
+        cols = [c.get("name") for c in r.get("cols", [])]
+        rows = []
+        for row in r.get("rows", []):
+            rows.append({cols[i]: _from_arg(cell) for i, cell in enumerate(row)})
+        out.append({
+            "cols": cols,
+            "rows": rows,
+            "affected": r.get("affected_row_count", 0),
+            "last_id": r.get("last_insert_rowid"),
+        })
     return out
 
 
