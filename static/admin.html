@@ -83,6 +83,22 @@
   .cfg-row input:focus{border-color:var(--brand)}
   .saved{color:var(--ok);font-size:12px}
   .note{font-size:11.5px;color:var(--text3);line-height:1.65;margin-top:10px}
+  /* ---- 学生切换 ---- */
+  .stu-tabs{display:flex;gap:8px;flex-wrap:wrap}
+  .stu-tab{padding:9px 14px;border-radius:12px;border:1.5px solid var(--line);background:#fff;
+    cursor:pointer;font-family:inherit;font-size:13px;color:var(--text2);transition:all .15s;
+    display:flex;align-items:center;gap:7px}
+  .stu-tab .dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+  .stu-tab.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand);font-weight:600}
+  .stu-tab.off{opacity:.5}
+  .stu-row{display:flex;align-items:center;gap:10px;padding:10px 0;font-size:13px;
+    border-bottom:1px dashed var(--line);flex-wrap:wrap}
+  .stu-row:last-child{border-bottom:none}
+  .stu-row .sname{font-weight:600;min-width:70px}
+  .stu-row .scode{font-size:11.5px;color:var(--text3);background:#f2f3f5;padding:2px 8px;border-radius:7px}
+  .stu-row .sstat{font-size:11.5px;color:var(--text3);margin-left:auto}
+  .stu-row .act{display:flex;gap:6px;width:100%;margin-top:6px}
+  .stu-row .act button{flex:1}
 </style>
 </head>
 <body>
@@ -115,6 +131,13 @@
     </div>
   </div>
 
+  <!-- 学生切换 -->
+  <div class="panel">
+    <h2>选择学生 <span class="tag">按最近使用排序</span></h2>
+    <div id="stuTabs" class="stu-tabs"></div>
+    <p class="note">点名字切换查看；旁边「管理」可新建、改名、停用学生。</p>
+  </div>
+
   <div class="grid4" id="statCards"></div>
 
   <div class="panel">
@@ -139,12 +162,20 @@
   </div>
 
   <div class="panel">
-    <h2>设置</h2>
+    <h2>学生管理</h2>
     <div class="cfg-row">
-      <label>学生称呼</label>
-      <input id="cfgName" placeholder="如：小明">
-      <button class="btn-sm pri" onclick="saveCfg()">保存</button>
+      <label>新增学生</label>
+      <input id="newSid" placeholder="登录码，如 xiaoming" autocapitalize="none">
+      <input id="newName" placeholder="名字，如 小明">
+      <button class="btn-sm pri" onclick="addStudent()">创建</button>
     </div>
+    <p class="note">把「登录码」告诉同学，他在学生端输入即可进入。登录码用拼音，建好后不可修改。</p>
+    <div id="stuList"></div>
+    <span class="saved" id="stuMsg"></span>
+  </div>
+
+  <div class="panel">
+    <h2>设置</h2>
     <div class="cfg-row">
       <label>每日目标(分)</label>
       <input id="cfgTarget" type="number" placeholder="25">
@@ -189,17 +220,112 @@ async function logout(){
 
 /* ---------- 看板 ---------- */
 let DATA = null;
+let CUR_SID = null;   // 当前查看的学生
+
 async function loadBoard(){
-  const r = await fetch("/api/admin/dashboard");
+  const url = "/api/admin/dashboard" + (CUR_SID ? ("?sid=" + encodeURIComponent(CUR_SID)) : "");
+  const r = await fetch(url);
   if(r.status===401){ $("login").style.display="block"; $("board").style.display="none"; return; }
   DATA = await r.json();
+  CUR_SID = (DATA.student && DATA.student.sid) || CUR_SID;
   render();
+  loadStudents();
 }
 function refresh(){ loadBoard(); }
 
+/* ---------- 学生切换 ---------- */
+async function loadStudents(){
+  const r = await fetch("/api/admin/students");
+  if(r.status===401) return;
+  const d = await r.json();
+  const list = d.students || [];
+  // 顶部切换标签
+  $("stuTabs").innerHTML = list.map(s=>`
+    <button class="stu-tab ${s.sid===CUR_SID?'on':''} ${s.active?'':'off'}"
+      onclick="pickStudent('${s.sid}')">
+      <span class="dot" style="background:${s.color||'#2f6fed'}"></span>
+      ${esc(s.name)}${s.active?'':'（停用）'}
+    </button>`).join("") || `<p class="note" style="margin:0">还没有学生，请在下方「学生管理」里创建。</p>`;
+
+  // 管理列表
+  $("stuList").innerHTML = list.map(s=>`
+    <div class="stu-row">
+      <span class="dot" style="background:${s.color||'#2f6fed'};width:8px;height:8px;border-radius:50%"></span>
+      <span class="sname">${esc(s.name)}</span>
+      <span class="scode">${esc(s.sid)}</span>
+      <span class="sstat">已答 ${s.answered||0} 题${s.lastActive?(' · 最近 '+fmtTime(s.lastActive)):' · 未使用'}</span>
+      <div class="act">
+        <button class="btn-sm" onclick="renameStudent('${s.sid}','${esc(s.name)}')">改名</button>
+        <button class="btn-sm" onclick="toggleStudent('${s.sid}',${s.active?1:0})">${s.active?'停用':'启用'}</button>
+        <button class="btn-sm" onclick="delStudent('${s.sid}','${esc(s.name)}')">删除</button>
+      </div>
+    </div>`).join("");
+}
+
+function fmtTime(t){
+  if(!t) return "";
+  try{
+    const d = new Date(t.replace(" ","T"));
+    const now = new Date();
+    const diff = Math.floor((now-d)/1000);
+    if(diff < 60) return "刚刚";
+    if(diff < 3600) return Math.floor(diff/60)+"分钟前";
+    if(diff < 86400) return Math.floor(diff/3600)+"小时前";
+    if(diff < 86400*30) return Math.floor(diff/86400)+"天前";
+    return t.slice(0,10);
+  }catch(e){ return t.slice(0,10); }
+}
+
+function pickStudent(sid){
+  CUR_SID = sid;
+  loadBoard();
+}
+
+async function addStudent(){
+  const sid = ($("newSid").value||"").trim().toLowerCase();
+  const name = ($("newName").value||"").trim();
+  const msg = $("stuMsg");
+  if(!sid){ msg.textContent = "请填写登录码"; return; }
+  const r = await fetch("/api/admin/students",{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify({sid,name})});
+  const d = await r.json();
+  msg.textContent = d.msg || (d.ok?"创建成功":"创建失败");
+  if(d.ok){ $("newSid").value=""; $("newName").value=""; loadStudents(); }
+}
+
+async function renameStudent(sid, oldName){
+  const nn = prompt("新的名字：", oldName);
+  if(nn===null || !nn.trim()) return;
+  await fetch("/api/admin/students/"+encodeURIComponent(sid),{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify({name:nn.trim()})});
+  $("stuMsg").textContent = "已改名";
+  loadBoard();
+}
+
+async function toggleStudent(sid, active){
+  await fetch("/api/admin/students/"+encodeURIComponent(sid),{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify({active: !active})});
+  $("stuMsg").textContent = active ? "已停用（该学生将无法登录）" : "已启用";
+  loadStudents();
+}
+
+async function delStudent(sid, name){
+  if(!confirm(`确定删除「${name}」吗？\n\n删除后该学生的登录码失效，学习记录也会一起删除，无法恢复。`)) return;
+  await fetch("/api/admin/students/"+encodeURIComponent(sid)+"?wipe=1",{method:"DELETE"});
+  $("stuMsg").textContent = "已删除";
+  if(CUR_SID===sid) CUR_SID = null;
+  loadBoard();
+}
+
 function render(){
   const d = DATA;
-  $("bTitle").textContent = (d.studentName||"同学") + " 的学习看板";
+  const stu = d.student || {};
+  $("bTitle").textContent = (stu.name || "同学") + " 的学习看板";
+  const sub = $("bSub");
+  if(sub){
+    sub.textContent = "登录码：" + (stu.sid || "-") +
+      (stu.lastActive ? " · 最近使用 " + fmtTime(stu.lastActive) : " · 尚未使用");
+  }
 
   const s = d.stats;
   const week = d.studyTime.reduce((a,b)=>a+b.minutes,0);
@@ -281,14 +407,12 @@ function render(){
 
   /* 配置 */
   fetch("/api/admin/config").then(r=>r.json()).then(c=>{
-    $("cfgName").value = c.studentName||"";
     $("cfgTarget").value = c.dailyTarget||25;
   });
 }
 
 async function saveCfg(){
   const body = {
-    studentName: $("cfgName").value.trim(),
     dailyTarget: $("cfgTarget").value.trim()
   };
   const np = $("cfgPwd").value.trim();

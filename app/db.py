@@ -154,6 +154,22 @@ def _ensure_dir():
 # 建表（两种后端通用）
 # =========================================================
 SCHEMA = [
+    # ---- 学生账号（多用户核心：登录码即身份）----
+    """CREATE TABLE IF NOT EXISTS students (
+        sid         TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        color       TEXT DEFAULT '#2f6fed',
+        active      INTEGER DEFAULT 1,
+        created_at  TEXT NOT NULL,
+        last_active TEXT
+    )""",
+    # ---- 登录态（记住登录用；token → sid）----
+    """CREATE TABLE IF NOT EXISTS tokens (
+        token      TEXT PRIMARY KEY,
+        sid        TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        last_used  TEXT
+    )""",
     # ---- 题库（内容与逻辑分离：题目存库，可动态增删/随机抽题）----
     """CREATE TABLE IF NOT EXISTS questions (
         qid        TEXT PRIMARY KEY,
@@ -262,6 +278,25 @@ def init_db():
     execute("INSERT OR IGNORE INTO config(key,value) VALUES(?,?)", ("student_name", "同学"))
     execute("INSERT OR IGNORE INTO config(key,value) VALUES(?,?)", ("daily_target_minutes", "25"))
 
+    _ensure_default_student()
+
+
+def _ensure_default_student():
+    """
+    保证至少有 1 个学生账号，且历史数据（student_id='default'）能被继承。
+
+    做法：保留 'default' 作为首个学生的 sid，昵称取 config.student_name，
+    这样此前所有作答记录无需搬运即可归到该学生名下。
+    """
+    rows = query("SELECT COUNT(*) AS n FROM students")
+    if rows and rows[0]["n"] > 0:
+        return
+    name = get_config("student_name", "同学")
+    now = datetime.now().isoformat(timespec="seconds")
+    execute("INSERT INTO students(sid,name,color,active,created_at,last_active) "
+            "VALUES(?,?,?,1,?,NULL)",
+            ("default", name, "#e8524a", now))
+
 
 # =========================================================
 # 配置
@@ -275,6 +310,96 @@ def set_config(key, value):
     # 兼容 upsert：先删后插，两种数据库都支持
     execute("DELETE FROM config WHERE key=?", (key,))
     execute("INSERT INTO config(key,value) VALUES(?,?)", (key, str(value)))
+
+
+# =========================================================
+# 学生账号（多用户）
+# =========================================================
+def list_students(active_only=True):
+    """学生列表。默认按最后使用时间倒序（最晚用的排最前）。"""
+    if active_only:
+        rows = query("SELECT * FROM students WHERE active=1")
+    else:
+        rows = query("SELECT * FROM students")
+    # last_active 为空（从未使用）排最后；否则按时间倒序
+    rows.sort(key=lambda r: (r.get("last_active") or "0000"), reverse=True)
+    return rows
+
+
+def get_student(sid):
+    rows = query("SELECT * FROM students WHERE sid=?", (sid,))
+    return rows[0] if rows else None
+
+
+def create_student(sid, name, color="#2f6fed"):
+    """新建学生。sid 即登录码（拼音）。返回是否成功（重名则失败）。"""
+    sid = (sid or "").strip()
+    name = (name or "").strip() or sid
+    if not sid:
+        return False, "登录码不能为空"
+    if get_student(sid):
+        return False, "这个登录码已经有人用了"
+    # last_active 留空：只有真正使用过才算"活跃"，保证列表排序有意义
+    execute("INSERT INTO students(sid,name,color,active,created_at,last_active) "
+            "VALUES(?,?,?,1,?,NULL)",
+            (sid, name, color, datetime.now().isoformat(timespec="seconds")))
+    return True, "创建成功"
+
+
+def update_student(sid, name=None, color=None, active=None):
+    if name is not None:
+        execute("UPDATE students SET name=? WHERE sid=?", (name, sid))
+    if color is not None:
+        execute("UPDATE students SET color=? WHERE sid=?", (color, sid))
+    if active is not None:
+        execute("UPDATE students SET active=? WHERE sid=?", (1 if active else 0, sid))
+
+
+def touch_student(sid):
+    """更新最后活跃时间（每次登录/操作时调用）"""
+    execute("UPDATE students SET last_active=? WHERE sid=?",
+            (datetime.now().isoformat(timespec="seconds"), sid))
+
+
+def delete_student(sid, wipe=False):
+    """删除学生。wipe=True 时连同其所有学习数据一起删除。"""
+    execute("DELETE FROM students WHERE sid=?", (sid,))
+    execute("DELETE FROM tokens WHERE sid=?", (sid,))
+    if wipe:
+        for t in ("answers", "sessions", "video_views", "task_done"):
+            execute(f"DELETE FROM {t} WHERE student_id=?", (sid,))
+
+
+# =========================================================
+# 登录态（token）
+# =========================================================
+def create_token(sid):
+    """生成一个登录令牌（记住登录用）"""
+    import uuid
+    token = uuid.uuid4().hex
+    now = datetime.now().isoformat(timespec="seconds")
+    execute("INSERT INTO tokens(token,sid,created_at,last_used) VALUES(?,?,?,?)",
+            (token, sid, now, now))
+    return token
+
+
+def resolve_token(token):
+    """token → sid；有效则刷新 last_used，同时更新学生活跃时间"""
+    if not token:
+        return None
+    rows = query("SELECT sid FROM tokens WHERE token=?", (token,))
+    if not rows:
+        return None
+    sid = rows[0]["sid"]
+    now = datetime.now().isoformat(timespec="seconds")
+    execute("UPDATE tokens SET last_used=? WHERE token=?", (now, token))
+    touch_student(sid)
+    return sid
+
+
+def revoke_token(token):
+    if token:
+        execute("DELETE FROM tokens WHERE token=?", (token,))
 
 
 # =========================================================
