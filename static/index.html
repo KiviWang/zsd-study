@@ -295,11 +295,12 @@
   .empty{text-align:center;color:var(--text3);font-size:13px;padding:40px 0;line-height:1.8}
   .hint{font-size:11.5px;color:var(--text3);line-height:1.6;margin-top:8px}
   .fade-note{font-size:11px;color:var(--text3);text-align:center;margin-top:14px;line-height:1.6}
-  /* 家长入口：做成小方块，不遮挡右侧操作按钮 */
-  .admin-corner{position:fixed;right:12px;bottom:96px;z-index:55;background:#fff;
-    border:1px solid var(--line);border-radius:50%;width:38px;height:38px;
+  /* 家长入口：放在顶部标题栏内，不占用下方视野 */
+  .admin-btn{width:34px;height:34px;border-radius:50%;flex:0 0 auto;
     display:flex;align-items:center;justify-content:center;font-size:15px;
-    color:var(--text3);box-shadow:var(--shadow);text-decoration:none;opacity:.85}
+    background:var(--brand-soft);border:1px solid var(--brand);color:var(--brand);
+    text-decoration:none;transition:background .15s,transform .12s}
+  .admin-btn:active{transform:scale(.94);background:#f3c8c4}
   .loading{text-align:center;color:var(--text3);font-size:13px;padding:30px 0}
 </style>
 </head>
@@ -365,6 +366,7 @@
       <p id="appSub">人教版 · 高一上</p>
     </div>
     <div class="streak" id="streakBox">🔥 连续 0 天</div>
+    <a class="admin-btn" href="/admin" title="家长入口" aria-label="家长入口">👤</a>
     <div class="who" onclick="openWho()">
       <span class="who-name" id="whoName">…</span>
       <span class="who-caret">▾</span>
@@ -460,8 +462,6 @@
     <p class="fade-note">学习记录已同步到服务器，家长可查看</p>
   </div>
 </div>
-
-<a class="admin-corner" href="/admin" title="家长入口">👤</a>
 
 <div class="navbar">
   <button class="nav on" data-scr="scrCourse" onclick="go('scrCourse')"><span class="ni">📚</span>课程</button>

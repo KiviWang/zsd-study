@@ -26,7 +26,8 @@ with sync_playwright() as p:
     ck("学生端首页加载（25 课）", pg.locator(".course-item").count()==25, str(pg.locator(".course-item").count()))
     ck("学科分组 3 组", pg.locator(".subj-head").count()==3, str(pg.locator(".subj-head").count()))
     ck("底部导航 5 项", pg.locator(".nav").count()>=4, str(pg.locator(".nav").count()))
-    ck("家长入口存在", pg.locator(".admin-corner").count()==1)
+    ck("家长入口在顶部标题栏", pg.locator("#mainTopbar .admin-btn").count()==1)
+    ck("家长入口不再悬浮在右下", pg.locator(".admin-corner").count()==0)
     pg.screenshot(path=f"{SHOT}/01_学生端首页.png")
 
     # 进入第1课（政治组第一课）
