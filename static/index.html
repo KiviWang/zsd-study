@@ -215,13 +215,43 @@
   .wq{border-bottom:1px dashed var(--line);padding-bottom:12px;margin-bottom:12px}
   .wq:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
   .wq .wqt{font-size:13.5px;font-weight:600;margin:0 0 8px;line-height:1.55}
+  .wq .meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 10px}
+  .wq .tag{font-size:10.5px;padding:2px 7px;border-radius:7px;font-weight:600}
+  .wq .tag.md-basic{color:#2f6fed;background:#e8f0fe}
+  .wq .tag.md-random{color:#b8791f;background:#fdf3e2}
+  .wq .tag.md-redo{color:#8a6d3b;background:#f3eee4}
+  .wq .tag.fixed{color:#fff;background:var(--ok)}
+  .wq .tag.need{color:var(--brand);background:var(--brand-soft)}
   .wq .mine{font-size:12px;color:var(--brand);margin:0 0 3px}
   .wq .right{font-size:12px;color:var(--ok);margin:0 0 8px}
   .wq .wexp{font-size:12px;color:var(--text2);background:#f7f8fa;border-radius:9px;
     padding:8px 10px;line-height:1.6;margin:0 0 10px}
-  .wq .redo{background:var(--ok);color:#fff;border:none;border-radius:10px;padding:9px;
-    width:100%;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer}
+  .wq .reveal{display:none}
+  .wq .reveal.show{display:block}
+  .wq-acts{display:flex;gap:8px;margin-top:4px}
+  .wq-acts button{flex:1;border:none;border-radius:10px;padding:9px;font-size:13px;
+    font-weight:600;font-family:inherit;cursor:pointer}
+  .wq .redo{background:var(--ok);color:#fff}
+  .wq .peek{background:#f1f3f7;color:var(--text2)}
   .redo-area{margin-top:8px}
+  .wb-top{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .wb-top .wb-all{flex:1;background:var(--brand);color:#fff;border:none;border-radius:12px;
+    padding:12px;font-size:13.5px;font-weight:600;font-family:inherit;cursor:pointer}
+  .wb-top .wb-all:disabled{background:#c8d3e6;cursor:default}
+  .redo-stage{margin-top:10px;background:#fafbfc;border:1px solid var(--line);
+    border-radius:12px;padding:12px}
+  .redo-stage .rd-head{font-size:12px;color:var(--text3);margin:0 0 8px;display:flex;
+    justify-content:space-between}
+  .redo-stage .rd-head b{color:var(--brand)}
+  .redo-opt{display:flex;align-items:flex-start;gap:8px;padding:9px 11px;border-radius:10px;
+    border:1px solid var(--line);background:#fff;margin-bottom:7px;cursor:pointer;font-size:13px}
+  .redo-opt .key{width:18px;height:18px;border-radius:50%;background:#eef1f6;color:var(--text2);
+    font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .redo-opt.right{border-color:var(--ok);background:#f1fbf6}
+  .redo-opt.right .key{background:var(--ok);color:#fff}
+  .redo-opt.wrong{border-color:var(--brand);background:var(--brand-soft)}
+  .redo-opt.wrong .key{background:var(--brand);color:#fff}
+  .redo-opt.locked{cursor:default;opacity:.9}
   .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
   .stat{background:#fff;border-radius:16px;padding:16px;text-align:center;
     border:1px solid var(--line);box-shadow:var(--shadow)}
@@ -373,7 +403,10 @@
   <div class="wrap">
     <div class="card">
       <h2>我的错题本</h2>
-      <p class="sub" id="wrongSub">做错的题会自动收进来，重做对了就自动移出</p>
+      <p class="sub" id="wrongSub">做错的题会自动收进来；做对了会标记「已订正」</p>
+    </div>
+    <div class="wb-top" id="wbTop" style="display:none">
+      <button class="wb-all" id="wbAllBtn" onclick="startRedoAll()">🔁 重做所有错题</button>
     </div>
     <div id="wrongList"><div class="loading">加载中…</div></div>
   </div>
@@ -389,6 +422,7 @@
       <div class="stat"><b id="mAns">0</b><span>累计答题数</span></div>
     </div>
     <div id="rateBox"></div>
+    <div id="modeStats"></div>
     <div class="card">
       <h2>学习建议</h2>
       <p class="sub" id="adviceTxt">做满 10 道题后这里会给出针对性建议。</p>
@@ -840,14 +874,21 @@ async function switchMode(mode){
 }
 
 function renderQuiz(c){
-  const mine = (c.myAnswers && c.myAnswers.byQid) || {};
-  const byIdx = (c.myAnswers && c.myAnswers.byIdx) || {};
+  // 按当前模式取"该模式"的作答状态，实现基础/随机互不干扰
+  const ma = c.myAnswers || {};
+  const byIdx = ma.byIdx || {};
+  const perMode = (c.mode === "random") ? (ma.byQidRandom || {})
+                                        : (ma.byQidBasic || ma.byQid || {});
+  const isRandom = c.mode === "random";
   $("tabQz").innerHTML = renderModeBar(c) + c.quiz.map((q,i)=>{
-    // 优先按 qid 恢复已答状态，兜底按下标（兼容历史记录）
-    const rec = (q.qid && mine[q.qid]) || byIdx[String(i)];
+    // 随机模式下，同一题在基础里做过不算数——只认随机自己的记录
+    const rec = q.qid ? perMode[q.qid] : null;
+    const recAny = (q.qid && ma.byQid && ma.byQid[q.qid]) || byIdx[String(i)];
     const done = !!rec;
+    // 提示：该题在另一模式做过
+    const otherDone = !done && !!recAny;
     return `<div class="qbox" id="q_${i}" ${done?'data-locked="1"':""}>
-      <div class="qnum">第 ${i+1} 题 / ${c.quiz.length}</div>
+      <div class="qnum">第 ${i+1} 题 / ${c.quiz.length}${otherDone?` <span style="color:var(--text3);font-weight:400">· ${isRandom?"基础":"随机"}练习已做过，本题独立计分</span>`:""}</div>
       <p class="qtxt">${esc(q.q)}</p>
       ${q.o.map((o,j)=>{
         let cls = "opt";
@@ -937,17 +978,44 @@ async function toggleTask(day,idx,done){
 }
 
 /* ================= 错题本 ================= */
+/* 设计：进入时默认"空白"——只显示题干，不显示答案。
+   学生可自主选择：① 重做这道题；② 查看答案与我当时的选项。
+   顶部有「重做所有」按钮，进入连续重做模式。 */
+let WB_DATA = [];        // 当前错题分组
+let REDO_QUEUE = [];     // 「重做所有」的待做队列
+let REDO_MODE = false;   // 是否处于连续重做模式
+
+const MODE_LABEL = {basic:"基础", random:"随机", redo:"重做"};
+
 async function loadWrong(){
   const r = await api("/api/wrongbook");
   const d = await r.json();
+  WB_DATA = d.groups || [];
   updateWrongBadge(d.total);
+  const top = $("wbTop");
   if(!d.groups.length){
     $("wrongList").innerHTML = `<div class="empty">🎉 错题本是空的<br><span style="font-size:12px">继续加油，做错的题会自动出现在这里</span></div>`;
     $("wrongSub").textContent = "暂无错题";
+    if(top) top.style.display = "none";
     return;
   }
-  $("wrongSub").textContent = `共 ${d.total} 道错题，重做对了会自动移出`;
-  $("wrongList").innerHTML = d.groups.map(g=>`
+  const fixed = d.groups.reduce((n,g)=>n+g.items.filter(it=>it.fixed).length,0);
+  $("wrongSub").textContent = `共 ${d.total} 道错题` + (fixed?`，其中 ${fixed} 道已订正`:``) + "（点「重做」自己做，或「看答案」直接查看）";
+  if(top) top.style.display = "";
+  if(REDO_MODE) return;   // 连续重做模式下手动刷新不重画画布
+  renderWrongList();
+}
+
+function modeTags(it){
+  const ms = (it.modes && it.modes.length) ? it.modes : [it.mode || "basic"];
+  let t = ms.map(m=>`<span class="tag md-${m}">${MODE_LABEL[m]||m}出错</span>`).join("");
+  if(it.fixed) t += `<span class="tag fixed">✓ 已订正</span>`;
+  else t += `<span class="tag need">待订正</span>`;
+  return t;
+}
+
+function renderWrongList(){
+  $("wrongList").innerHTML = WB_DATA.map(g=>`
     <div class="wg">
       <div class="wg-head">
         <span class="dot" style="background:${g.color}"></span>
@@ -956,57 +1024,159 @@ async function loadWrong(){
       </div>
       <div class="wg-body">
         ${g.items.map(it=>`
-          <div class="wq">
+          <div class="wq" data-qid="${esc(it.qid||"")}" data-idx="${it.questionIdx===null?'':it.questionIdx}" data-cid="${esc(g.courseId)}">
             <p class="wqt">${esc(it.q)}</p>
-            <p class="mine">你选的是：${"ABCD"[it.myAnswer]}． ${esc(it.o[it.myAnswer]||"")}</p>
-            <p class="right">正确答案：${"ABCD"[it.answer]}． ${esc(it.o[it.answer])}</p>
-            <p class="wexp">💡 ${esc(it.explain)}</p>
-            <button class="redo" onclick="redo('${g.courseId}','${it.qid||""}',${it.questionIdx===null?'null':it.questionIdx},this)">重做这道题</button>
+            <div class="meta">${modeTags(it)}</div>
+            <div class="reveal">
+              <p class="mine">你当时选的是：${"ABCD"[it.myAnswer]||"?"}． ${esc(it.o[it.myAnswer]||"")}</p>
+              <p class="right">正确答案：${"ABCD"[it.answer]}． ${esc(it.o[it.answer])}</p>
+              <p class="wexp">💡 ${esc(it.explain)}</p>
+            </div>
+            <div class="wq-acts">
+              <button class="redo" onclick="redo(this)">✏️ 重做这道题</button>
+              <button class="peek" onclick="togglePeek(this)">👀 看答案</button>
+            </div>
             <div class="redo-area"></div>
           </div>`).join("")}
       </div>
     </div>`).join("");
 }
 
-async function redo(cid,qid,qi,btn){
+function togglePeek(btn){
   const item = btn.closest(".wq");
-  const area = item.querySelector(".redo-area");
-  const c = await (await api("/api/course/"+cid)).json();
-  const q = qid ? c.quiz.find(x=>x.qid===qid) : c.quiz[qi];
-  if(!q){ area.innerHTML = "<p class='hint'>题目已更新，请刷新后重试</p>"; return; }
-  item.dataset.redoQid = q.qid || "";
-  item.dataset.redoIdx = qi===null ? "" : qi;
-  area.innerHTML = `<div style="margin-top:10px">
-      <p style="font-size:12px;color:var(--text3);margin:0 0 8px">请重新选择答案：</p>
-      ${q.o.map((o,j)=>`<div class="opt" onclick="redoPick('${cid}',${j},this)">
-        <span class="key">${"ABCD"[j]}</span><span>${esc(o)}</span></div>`).join("")}
-      <div class="exp"></div>
-    </div>`;
-  btn.style.display = "none";
+  const rv = item.querySelector(".reveal");
+  const on = rv.classList.toggle("show");
+  btn.textContent = on ? "🙈 收起答案" : "👀 看答案";
 }
 
-async function redoPick(cid,choice,el){
-  const area = el.parentElement;
+/* 单题重做：在卡片内展开选项 */
+async function redo(btn){
+  const item = btn.closest(".wq");
+  await openRedoStage(item);
+  const acts = item.querySelector(".wq-acts");
+  if(acts) acts.style.display = "none";
+}
+
+async function openRedoStage(item){
+  const cid = item.dataset.cid;
+  const qid = item.dataset.qid || "";
+  const qi = item.dataset.idx === "" ? null : Number(item.dataset.idx);
+  const area = item.querySelector(".redo-area");
+  const c = await (await api("/api/course/"+cid)).json();
+  let q = qid ? c.quiz.find(x=>x.qid===qid) : null;
+  if(!q && qi!==null) q = c.quiz[qi];
+  if(!q && qid){   // 该题不在当前模式题目里（如只在强化题库），单独取
+    const rq = await (await api("/api/question/"+encodeURIComponent(qid))).json();
+    if(rq && rq.q) q = {qid:rq.qid, q:rq.q, o:rq.o, a:rq.a, e:rq.e};
+  }
+  if(!q){ area.innerHTML = "<p class='hint'>题目已更新，请刷新后重试</p>"; return false; }
+  item.dataset.redoQid = q.qid || qid || "";
+  item.dataset.redoIdx = qi===null ? "" : qi;
+  area.innerHTML = `<div class="redo-stage">
+      <div class="rd-head"><span>重新作答</span><b>选一个你认为正确的选项</b></div>
+      ${q.o.map((o,j)=>`<div class="redo-opt" onclick="redoPick(${j},this)">
+        <span class="key">${"ABCD"[j]}</span><span>${esc(o)}</span></div>`).join("")}
+      <div class="exp" style="font-size:12px;color:var(--text2);line-height:1.65;margin-top:6px"></div>
+    </div>`;
+  return true;
+}
+
+async function redoPick(choice,el){
+  const stage = el.closest(".redo-stage");
   const item = el.closest(".wq");
-  area.querySelectorAll(".opt").forEach(o=>{o.classList.add("locked");o.removeAttribute("onclick");});
+  const cid = item.dataset.cid;
+  stage.querySelectorAll(".redo-opt").forEach(o=>{o.classList.add("locked");o.removeAttribute("onclick");});
   const qi = item.dataset.redoIdx===""?null:Number(item.dataset.redoIdx);
+  const qid = item.dataset.redoQid || null;
   const r = await api("/api/redo",{method:"POST",
-    body:JSON.stringify({courseId:cid,qid:item.dataset.redoQid||null,
-      questionIdx:qi, chosen:choice})});
+    body:JSON.stringify({courseId:cid,qid:qid,questionIdx:qi,chosen:choice})});
   const d = await r.json();
-  // 匿名模式：重做也记到本地（答对即覆盖旧错题）
-  if(isAnon()) anonStore.addAnswer(cid, item.dataset.redoQid||null, qi, choice, d.correct, "redo");
-  const opts = area.querySelectorAll(".opt");
-  opts.forEach((o,j)=>{
+  stage.querySelectorAll(".redo-opt").forEach((o,j)=>{
     if(j===d.answer) o.classList.add("right");
-    else if(j===choice) o.classList.add("wrong");
+    else if(j===choice && !d.correct) o.classList.add("wrong");
   });
-  const e = area.querySelector(".exp");
+  if(isAnon()) anonStore.addAnswer(cid, qid, qi, choice, d.correct, "redo");
+  // 实时同步本地状态，避免"重做对了仍显示待订正"
+  const g = WB_DATA.find(x=>x.courseId===cid);
+  if(g){
+    const it = g.items.find(w=>(w.qid&&w.qid===qid) || (qid===null && w.questionIdx===qi));
+    if(it){ it.fixed = !!d.correct; if(!it.modes.includes("redo")) it.modes.push("redo"); }
+  }
+  const e = stage.querySelector(".exp");
   e.classList.add("show");
-  e.innerHTML = (d.correct?"✅ 答对了！已从错题本移除":"❌ 又错了，再看看解析") +
-    "<b>解析：</b>" + esc(d.explain);
-  setTimeout(loadWrong, d.correct?1200:2200);
+  e.innerHTML = (d.correct?"✅ 答对了！已标记为「已订正」":"❌ 又错了，认真看解析，稍后再来") +
+    "<br><b>解析：</b>" + esc(d.explain);
+  // 连续重做模式：答完自动进入下一题
+  if(REDO_MODE){
+    setTimeout(()=>{ advanceRedoAll(item); }, d.correct?900:2000);
+  }
   loadCourses();
+}
+
+/* ============ 重做所有（连续重做） ============ */
+function startRedoAll(){
+  if(!WB_DATA.length) return;
+  REDO_QUEUE = [];
+  WB_DATA.forEach(g=>g.items.forEach(it=>REDO_QUEUE.push({cid:g.courseId, it})));
+  REDO_MODE = true;
+  $("wbAllBtn").textContent = `⏸ 退出重做（剩余 ${REDO_QUEUE.length} 题）`;
+  $("wbAllBtn").onclick = exitRedoAll;
+  renderRedoAll();
+}
+
+function renderRedoAll(){
+  if(!REDO_QUEUE.length){
+    $("wrongList").innerHTML = `<div class="empty">🎉 本轮错题重做完毕！<br><span style="font-size:12px">答对的都已标记「已订正」，再点一次「重做所有」可重来一轮</span></div>`;
+    $("wbAllBtn").textContent = "🔁 重做所有错题";
+    $("wbAllBtn").onclick = startRedoAll;
+    REDO_MODE = false;
+    return;
+  }
+  const head = REDO_QUEUE[0];
+  const it = head.it;
+  $("wrongList").innerHTML = `
+    <div class="wg">
+      <div class="wg-head">
+        <span class="dot" style="background:var(--brand)"></span>
+        <b>连续重做中 · 还剩 ${REDO_QUEUE.length} 题</b>
+        <span class="cnt">逐题订正</span>
+      </div>
+      <div class="wg-body">
+        <div class="wq" data-qid="${esc(it.qid||"")}" data-idx="${it.questionIdx===null?'':it.questionIdx}" data-cid="${esc(head.cid)}">
+          <p class="wqt">${esc(it.q)}</p>
+          <div class="meta">${modeTags(it)}</div>
+          <div class="reveal">
+            <p class="mine">你当时选的是：${"ABCD"[it.myAnswer]||"?"}． ${esc(it.o[it.myAnswer]||"")}</p>
+            <p class="right">正确答案：${"ABCD"[it.answer]}． ${esc(it.o[it.answer])}</p>
+            <p class="wexp">💡 ${esc(it.explain)}</p>
+          </div>
+          <div class="wq-acts">
+            <button class="peek" onclick="togglePeek(this)">👀 看答案</button>
+          </div>
+          <div class="redo-area"></div>
+        </div>
+      </div>
+    </div>`;
+  openRedoStage(document.querySelector("#wrongList .wq"));
+}
+
+function advanceRedoAll(item){
+  // 从队列移除刚做完的这道
+  const qid = item.dataset.redoQid || null;
+  const qi = item.dataset.redoIdx===""?null:Number(item.dataset.redoIdx);
+  const cid = item.dataset.cid;
+  const i = REDO_QUEUE.findIndex(x=>(x.it.qid&&x.it.qid===qid) || (qid===null&&x.it.questionIdx===qi&&x.cid===cid));
+  if(i>=0) REDO_QUEUE.splice(i,1);
+  $("wbAllBtn").textContent = `⏸ 退出重做（剩余 ${REDO_QUEUE.length} 题）`;
+  renderRedoAll();
+}
+
+function exitRedoAll(){
+  REDO_MODE = false;
+  REDO_QUEUE = [];
+  $("wbAllBtn").textContent = "🔁 重做所有错题";
+  $("wbAllBtn").onclick = startRedoAll;
+  loadWrong();
 }
 
 /* ================= 我的 ================= */
@@ -1034,6 +1204,25 @@ async function loadMe(){
     desc=`正确率 ${s.rate}%。先别急着刷题——回到知识卡，每课 8 条按顺序读三遍，合上屏幕口头复述。`;}
   $("rateBox").innerHTML = `<div class="rate ${cls}">
     <p class="rt">本阶段评价：${title}</p><p class="rd">${desc}</p></div>`;
+
+  // 分模式进度（基础 / 随机 / 重做 各算各的）
+  const bm = s.by_mode || {};
+  const rowOf = (key,label,color,desc)=>{
+    const v = bm[key];
+    if(!v || !v.total) return "";
+    return `<div style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px">
+        <span><b style="color:${color}">${label}</b> <span style="color:var(--text3)">${desc}</span></span>
+        <span style="color:${v.rate>=80?"var(--ok)":v.rate>=60?"#c8912b":"var(--brand)"}">${v.right}/${v.total}（${v.rate}%）</span>
+      </div><div class="bar"><i style="width:${v.rate}%;background:${color}"></i></div></div>`;
+  };
+  const rows = rowOf("basic","基础巩固","#2f6fed","按课本顺序")
+             + rowOf("random","强化训练","#e8934a","随机抽题")
+             + rowOf("redo","错题重做","#8a6d3b","订正错题");
+  $("modeStats").innerHTML = rows ? `<div class="card">
+    <h2>分类型练习进度</h2>
+    <p class="sub">基础与强化分开统计，互不干扰</p>
+    <div style="margin-top:6px">${rows}</div></div>` : "";
 
   if(s.total>=10){
     let bd="";

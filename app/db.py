@@ -546,17 +546,22 @@ def reset_course_answers(course_id, student_id="default"):
 
 def _latest_answers_where(where_extra="", params=(), by_qid=True):
     """
-    取每题最近一次作答。
-    by_qid=True  → 按 qid 分组（题库模式，题目顺序变化也不受影响）
-    by_qid=False → 按 question_idx 分组（兼容未迁移的历史数据）
+    取每题每次练习模式下的最近一次作答。
+
+    重要：分组键是 (qid, mode)，不是单独的 qid。
+    这样"基础练习"和"随机测试"里同一道题的作答互不干扰——
+    基础答过不影响随机，随机答对也不覆盖基础。
+
+    by_qid=True  → 按 qid+mode 分组（题库模式）
+    by_qid=False → 按 course_id+idx+mode 分组（兼容未迁移的历史数据）
     """
     if by_qid:
         sql = """
             SELECT a.* FROM answers a
             INNER JOIN (
-                SELECT qid, MAX(id) AS max_id
+                SELECT qid, COALESCE(mode,'basic') AS m, MAX(id) AS max_id
                 FROM answers WHERE student_id=? AND qid IS NOT NULL
-                GROUP BY qid
+                GROUP BY qid, m
             ) t ON a.id = t.max_id
             WHERE a.student_id = ? %s
         """ % where_extra
@@ -564,9 +569,9 @@ def _latest_answers_where(where_extra="", params=(), by_qid=True):
         sql = """
             SELECT a.* FROM answers a
             INNER JOIN (
-                SELECT course_id, question_idx, MAX(id) AS max_id
+                SELECT course_id, question_idx, COALESCE(mode,'basic') AS m, MAX(id) AS max_id
                 FROM answers WHERE student_id=? AND qid IS NULL
-                GROUP BY course_id, question_idx
+                GROUP BY course_id, question_idx, m
             ) t ON a.id = t.max_id
             WHERE a.student_id = ? %s
         """ % where_extra
@@ -575,14 +580,23 @@ def _latest_answers_where(where_extra="", params=(), by_qid=True):
 
 def get_course_answers(course_id, student_id="default"):
     """
-    取本课每题最近一次作答状态。
-    返回 {"byQid": {qid: {...}}, "byIdx": {idx: {...}}}
-      后端的题目列表可直接用 byQid[qid] / byIdx[str(i)] 恢复页面已答状态。
+    取本课每题的作答状态，按模式分开返回。
+
+    返回 {"byQid": {qid: {...}}, "byIdx": {idx: {...}},
+          "byQidBasic": {...}, "byQidRandom": {...}}
+      · byQid / byIdx      —— 兼容旧前端：取该题"任意模式"下最近一次
+      · byQidBasic         —— 仅基础练习的状态
+      · byQidRandom        —— 仅随机测试的状态
+    这样基础练习和随机测试互不干扰。
     """
     rows = query("""
-        SELECT a.qid, a.question_idx, a.chosen, a.correct FROM answers a
+        SELECT a.qid, a.question_idx, a.chosen, a.correct, COALESCE(a.mode,'basic') AS mode, a.id
+        FROM answers a
         INNER JOIN (
-            SELECT COALESCE(qid, 'idx:' || course_id || ':' || question_idx) AS k,
+            SELECT CASE
+                     WHEN qid IS NOT NULL THEN 'q:' || qid
+                     ELSE 'i:' || course_id || ':' || question_idx
+                   END || '#' || COALESCE(mode,'basic') AS k,
                    MAX(id) AS max_id
             FROM answers
             WHERE student_id=? AND course_id=?
@@ -590,48 +604,126 @@ def get_course_answers(course_id, student_id="default"):
         ) t ON a.id = t.max_id
         WHERE a.student_id=? AND a.course_id=?
     """, (student_id, course_id, student_id, course_id))
+
     by_qid, by_idx = {}, {}
-    for r in rows:
-        info = {"chosen": r["chosen"], "correct": bool(r["correct"])}
+    by_qid_basic, by_qid_random = {}, {}
+    # rows 已按"每个 (题,模式)"唯一，再挑各模式最近一条
+    sorted_rows = sorted(rows, key=lambda r: r.get("id") or 0)
+    for r in sorted_rows:
+        info = {"chosen": r["chosen"], "correct": bool(r["correct"]),
+                "mode": r.get("mode") or "basic"}
         if r.get("qid"):
-            by_qid[r["qid"]] = info
+            by_qid[r["qid"]] = info                      # 任意模式最近一条
+            if info["mode"] == "random":
+                by_qid_random[r["qid"]] = info
+            elif info["mode"] == "basic":
+                by_qid_basic[r["qid"]] = info
         if r.get("question_idx") is not None:
             by_idx[str(r["question_idx"])] = info
-    return {"byQid": by_qid, "byIdx": by_idx}
+    return {"byQid": by_qid, "byIdx": by_idx,
+            "byQidBasic": by_qid_basic, "byQidRandom": by_qid_random}
 
 
 def _all_latest_answers(student_id="default", where_extra=""):
-    """合并"按qid"与"按idx"两条路径的最新作答，避免遗漏历史数据"""
+    """
+    合并"按qid"与"按idx"两条路径的最新作答，避免遗漏历史数据。
+    注意：分组键为 (qid, mode)，同一道题在基础/随机下会各返回一行。
+    """
     a = _latest_answers_where(where_extra, (student_id, student_id), by_qid=True)
     b = _latest_answers_where(where_extra, (student_id, student_id), by_qid=False)
     return a + b
 
 
 def get_wrong_questions(student_id="default"):
-    """错题（合并题库模式与历史模式）"""
-    rows = _all_latest_answers(student_id, "AND a.correct = 0")
-    rows.sort(key=lambda r: r.get("answered_at") or "", reverse=True)
-    return rows
+    """
+    错题本数据源。
+
+    规则（对应需求"错题重做答对后保留但标记已订正"）：
+      · 只要某题曾经做错过，就留在错题本里
+      · 同一道题在基础/随机/重做下都算同一道题，按 qid 去重
+        （qid 缺失的历史数据退化为 course_id+idx）
+      · 若最近一次作答（任意模式）已答对，则 fixed=True（标记"已订正"）
+      · modes 记录该题曾出错过的模式来源，wrong_times 记录出错次数
+
+    这样错题本不会因为做对就消失，学生能看到自己订正过的足迹。
+    """
+    all_rows = _all_latest_answers(student_id)
+    wrong_rows = [r for r in all_rows if not r["correct"]]
+
+    # 按 key 归并"最近一次作答"（用于判断是否已订正）
+    latest_all = {}
+    for r in all_rows:
+        key = r.get("qid") or "idx:%s:%s" % (r.get("course_id"), r.get("question_idx"))
+        cur = latest_all.get(key)
+        if cur is None or (r.get("id") or 0) > (cur.get("id") or 0):
+            latest_all[key] = r
+
+    merged, order = {}, []
+    for r in sorted(wrong_rows, key=lambda x: x.get("id") or 0, reverse=True):
+        key = r.get("qid") or "idx:%s:%s" % (r.get("course_id"), r.get("question_idx"))
+        if key not in merged:
+            item = dict(r)
+            item["modes"] = set()
+            item["wrong_times"] = 0
+            merged[key] = item
+            order.append(key)
+        merged[key]["modes"].add(r.get("mode") or "basic")
+        merged[key]["wrong_times"] += 1
+
+    out = []
+    for k in order:
+        item = merged[k]
+        latest = latest_all.get(k) or item
+        item["modes"] = sorted(item["modes"])
+        item["mode"] = item["modes"][0] if item["modes"] else "basic"
+        # 最近一次（任意模式）答对 → 已订正
+        item["fixed"] = bool(latest.get("correct"))
+        item["fixed_at"] = latest.get("answered_at") if item["fixed"] else None
+        out.append(item)
+    return out
 
 
 def get_stats(student_id="default"):
+    """
+    总体统计。同一道题在基础/随机下各算各的（模式隔离），
+    因此 total 会大于题目总数——这是刻意设计。
+    额外返回 by_mode / by_course_mode，供前端分模式展示。
+    """
     rows = _all_latest_answers(student_id)
     by_course = {}
+    by_mode = {"basic": {"total": 0, "right": 0},
+               "random": {"total": 0, "right": 0},
+               "redo": {"total": 0, "right": 0}}
+    by_course_mode = {}
     total = 0
     right = 0
     for r in rows:
         cid = r["course_id"]
+        mode = r.get("mode") or "basic"
+        if mode not in by_mode:
+            by_mode[mode] = {"total": 0, "right": 0}
         by_course.setdefault(cid, {"total": 0, "right": 0})
+        by_course_mode.setdefault(cid, {}).setdefault(
+            mode, {"total": 0, "right": 0})
         by_course[cid]["total"] += 1
+        by_course_mode[cid][mode]["total"] += 1
+        by_mode[mode]["total"] += 1
         total += 1
         if r["correct"]:
             by_course[cid]["right"] += 1
+            by_course_mode[cid][mode]["right"] += 1
+            by_mode[mode]["right"] += 1
             right += 1
+    for d in list(by_mode.values()) + list(by_course.values()) + \
+             [v for m in by_course_mode.values() for v in m.values()]:
+        d["rate"] = round(d["right"] / d["total"] * 100) if d["total"] else 0
     return {
         "total": total,
         "right": right,
         "rate": round(right / total * 100) if total else 0,
         "by_course": by_course,
+        "by_mode": by_mode,
+        "by_course_mode": by_course_mode,
         "wrong_count": total - right,
     }
 
@@ -777,10 +869,12 @@ def _anon_rows(payload):
 
 
 def _anon_latest(rows):
-    """同一题只保留最后一次作答（qid 优先，否则按 idx）"""
+    """同一题同一模式只保留最后一次作答（qid 优先，否则按 idx）"""
     latest = {}
     for r in rows:
-        key = ("q", r["qid"]) if r.get("qid") else ("i", r["course_id"], r.get("question_idx"))
+        base = ("q", r["qid"]) if r.get("qid") else \
+               ("i", r["course_id"], r.get("question_idx"))
+        key = base + (r.get("mode") or "basic",)
         old = latest.get(key)
         if old is None or (r.get("answered_at") or "") >= (old.get("answered_at") or ""):
             latest[key] = r
@@ -789,49 +883,81 @@ def _anon_latest(rows):
 
 def anon_stats(payload):
     rows = _anon_latest(_anon_rows(payload))
-    by_course, total, right = {}, 0, 0
+    by_course, by_mode, total, right = {}, {}, 0, 0
     for r in rows:
         cid = r["course_id"]
+        mode = r.get("mode") or "basic"
         by_course.setdefault(cid, {"total": 0, "right": 0})
+        by_mode.setdefault(mode, {"total": 0, "right": 0})
         by_course[cid]["total"] += 1
+        by_mode[mode]["total"] += 1
         total += 1
         if r["correct"]:
             by_course[cid]["right"] += 1
+            by_mode[mode]["right"] += 1
             right += 1
+    for d in list(by_course.values()) + list(by_mode.values()):
+        d["rate"] = round(d["right"] / d["total"] * 100) if d["total"] else 0
     return {"total": total, "right": right,
             "rate": round(right / total * 100) if total else 0,
-            "by_course": by_course, "wrong_count": total - right}
+            "by_course": by_course, "by_mode": by_mode,
+            "wrong_count": total - right}
 
 
 def anon_course_answers(course_id, payload):
     rows = _anon_latest(_anon_rows(payload))
     by_qid, by_idx = {}, {}
+    by_qid_basic, by_qid_random = {}, {}
     for r in rows:
         if r["course_id"] != course_id:
             continue
-        info = {"chosen": r["chosen"], "correct": bool(r["correct"])}
+        mode = r.get("mode") or "basic"
+        info = {"chosen": r["chosen"], "correct": bool(r["correct"]), "mode": mode}
         if r.get("qid"):
             by_qid[r["qid"]] = info
+            if mode == "random":
+                by_qid_random[r["qid"]] = info
+            elif mode == "basic":
+                by_qid_basic[r["qid"]] = info
         if r.get("question_idx") is not None:
             by_idx[str(r["question_idx"])] = info
-    return {"byQid": by_qid, "byIdx": by_idx}
+    return {"byQid": by_qid, "byIdx": by_idx,
+            "byQidBasic": by_qid_basic, "byQidRandom": by_qid_random}
 
 
 def anon_wrong_questions(payload):
-    """错题列表：带上题干/选项/解析，方便前端直接渲染"""
-    rows = [r for r in _anon_latest(_anon_rows(payload)) if not r["correct"]]
+    """
+    错题列表：带上题干/选项/解析，方便前端直接渲染（按 qid 去重）。
+    与登录用户一致：曾做错即保留，最近一次答对则标记 fixed=True。
+    """
+    all_latest = _anon_latest(_anon_rows(payload))
+    latest_by_qid = {}
+    for r in all_latest:
+        if not r.get("qid"):
+            continue
+        cur = latest_by_qid.get(r["qid"])
+        if cur is None or (r.get("answered_at") or "") >= (cur.get("answered_at") or ""):
+            latest_by_qid[r["qid"]] = r
+
+    rows = [r for r in all_latest if not r["correct"]]
     rows.sort(key=lambda r: r.get("answered_at") or "", reverse=True)
-    out = []
+    out, seen = [], set()
     for r in rows:
-        q = _get_question_row(r["qid"]) if r.get("qid") else None
+        if not r.get("qid") or r["qid"] in seen:
+            continue
+        seen.add(r["qid"])
+        q = _get_question_row(r["qid"])
         if not q:
             continue
+        latest = latest_by_qid.get(r["qid"]) or r
         out.append({
             "qid": q["qid"], "course_id": q["course_id"],
             "courseTitle": _course_title(q["course_id"]),
             "stem": q["stem"], "options": q["options"],
             "answer": q["answer"], "explain": q.get("explain", ""),
             "chosen": r["chosen"], "answered_at": r["answered_at"],
+            "mode": r.get("mode") or "basic",
+            "fixed": bool(latest.get("correct")),
         })
     return out
 

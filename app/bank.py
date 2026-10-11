@@ -52,6 +52,11 @@ def _row_to_q(r):
 def seed_from_courses(courses):
     """
     从 courses.py 的 COURSES 结构导入题目。
+
+    每个课程可有两组题：
+      · quiz      → tier=basic，qid=<cid>_01、_02…（基础巩固，固定顺序）
+      · quiz_adv  → tier=advanced，qid=<cid>_a01、_a02…（强化训练，随机抽题）
+
     已有同 qid 的题目跳过（不覆盖），保证人工在库里改过的题不被冲掉。
     返回 (新增数, 跳过数)
     """
@@ -66,20 +71,24 @@ def seed_from_courses(courses):
             (cid, c.get("no", ""), c.get("subject", "政治"), c.get("title", ""),
              c.get("subtitle", ""), c.get("color", "#2f6fed"), _course_order(cid))
         )
-        for i, q in enumerate(c.get("quiz", [])):
-            qid = f"{cid}_{i+1:02d}"
-            exists = query("SELECT qid FROM questions WHERE qid=?", (qid,))
-            if exists:
-                skipped += 1
-                continue
-            execute(
-                "INSERT INTO questions(qid,course_id,subject,tier,qtype,stem,options,answer,"
-                "explain,sort_order,active,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,1,?)",
-                (qid, cid, c.get("subject", "政治"), TIER_BASIC, "choice",
-                 q["q"], json.dumps(q["o"], ensure_ascii=False), q["a"],
-                 q.get("e", ""), i, now)
-            )
-            added += 1
+        # 两组题：基础 + 强化
+        groups = ((c.get("quiz", []), TIER_BASIC, ""),
+                  (c.get("quiz_adv", []), TIER_ADVANCED, "a"))
+        for qlist, tier, prefix in groups:
+            for i, q in enumerate(qlist):
+                qid = f"{cid}_{prefix}{i+1:02d}"
+                exists = query("SELECT qid FROM questions WHERE qid=?", (qid,))
+                if exists:
+                    skipped += 1
+                    continue
+                execute(
+                    "INSERT INTO questions(qid,course_id,subject,tier,qtype,stem,options,answer,"
+                    "explain,sort_order,active,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,1,?)",
+                    (qid, cid, c.get("subject", "政治"), tier, "choice",
+                     q["q"], json.dumps(q["o"], ensure_ascii=False), q["a"],
+                     q.get("e", ""), i, now)
+                )
+                added += 1
     return added, skipped
 
 
@@ -126,45 +135,52 @@ def count_questions(course_id, tier=None):
 def build_quiz(course_id, mode=MODE_BASIC, limit=None, tier=None):
     """
     生成一套题目。
-      mode=basic   → 固定顺序（默认全部基础题）
-      mode=random  → 随机抽取 limit 道（优先强化题，不足则用基础题补）
-      tier         → 指定只出某一层
+
+      mode=basic   → 基础巩固：只出 tier=basic 的题，按固定顺序
+      mode=random  → 强化训练：随机抽 limit 道。优先从 tier=advanced 抽，
+                     不够时再用 basic 补足（保证凑满 limit 道）
+      tier         → 显式指定只出某一层（覆盖默认行为）
     返回题目列表（列表顺序即出题顺序）
     """
     if mode == MODE_RANDOM:
-        pool = []
+        n = limit or 10
         if tier:
             pool = get_questions(course_id, tier)
+            random.shuffle(pool)
+            return pool[:n]
+        adv = get_questions(course_id, TIER_ADVANCED)
+        bas = get_questions(course_id, TIER_BASIC)
+        # 先抽强化题；不足再用基础题补足，避免凑不满
+        if len(adv) >= n:
+            chosen = random.sample(adv, n)
         else:
-            # 强化题优先，基础题补足
-            adv = get_questions(course_id, TIER_ADVANCED)
-            bas = get_questions(course_id, TIER_BASIC)
-            pool = adv + bas
-        if not pool:
-            return []
-        random.shuffle(pool)
-        return pool[:limit] if limit else pool
+            chosen = adv[:]
+            need = n - len(chosen)
+            if need > 0:
+                chosen += random.sample(bas, min(need, len(bas)))
+        random.shuffle(chosen)
+        return chosen
 
-    # basic：固定顺序
-    qs = get_questions(course_id, tier)
+    # basic：固定顺序，只出基础层（默认）
+    qs = get_questions(course_id, tier if tier else TIER_BASIC)
     return qs[:limit] if limit else qs
 
 
 def available_modes(course_id):
     """该课程可用的出题模式（供前端展示）"""
-    total = count_questions(course_id)
+    basic = count_questions(course_id, TIER_BASIC)
     advanced = count_questions(course_id, TIER_ADVANCED)
     modes = []
-    if total:
+    if basic:
         modes.append({"mode": MODE_BASIC, "label": "基础巩固",
-                      "desc": "按课本顺序做固定题", "count": total})
+                      "desc": "按课本顺序做固定题", "count": basic})
     if advanced:
         modes.append({"mode": MODE_RANDOM, "label": "强化训练",
-                      "desc": "从强化题中随机抽题，每次不同", "count": advanced})
-    elif total:
-        # 还没有强化题时，随机模式也可用（从现有题库抽）
+                      "desc": "随机抽题，每次不同", "count": advanced})
+    elif basic:
+        # 还没有强化题时，随机模式也可用（从基础题库抽）
         modes.append({"mode": MODE_RANDOM, "label": "随机练习",
-                      "desc": "从题库中随机抽题，每次不同", "count": total})
+                      "desc": "从题库中随机抽题，每次不同", "count": basic})
     return modes
 
 

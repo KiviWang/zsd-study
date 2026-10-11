@@ -270,6 +270,15 @@ def api_course(cid):
     return jsonify(data)
 
 
+@app.route("/api/question/<qid>")
+def api_question(qid):
+    """按 qid 取单题（错题本重做时，题目可能不在当前出题集合里，需要单独取）"""
+    q = get_question(qid)
+    if not q:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(q)
+
+
 @app.route("/api/answer", methods=["POST"])
 def api_answer():
     """提交答案，服务端判分。优先按 qid 判分（题库模式）。"""
@@ -305,7 +314,14 @@ def api_answer():
 
 @app.route("/api/wrongbook")
 def api_wrongbook():
-    """电子错题本：按课程分组。优先用题库取题信息，兜底用内置题目。"""
+    """
+    电子错题本：按课程分组。
+
+    设计要点（对应需求"错题本不直接给答案"）：
+      · 前端进入时默认收起答案，由学生点"查看答案/我的选项"才展开
+      · 所以这里仍然把 answer/explain/myAnswer 一并返回，但由前端控制显隐
+      · 同题多模式做错只出现一次，用 modes 标明来源（基础/随机）
+    """
     if _is_anon():
         items = anon_wrong_questions(_anon_payload())
         groups = {}
@@ -323,6 +339,8 @@ def api_wrongbook():
                 "q": it["stem"], "o": it["options"],
                 "answer": it["answer"], "explain": it["explain"],
                 "myAnswer": it["chosen"], "answeredAt": it["answered_at"],
+                "mode": it.get("mode", "basic"), "modes": [it.get("mode", "basic")],
+                "fixed": False, "wrongTimes": 1,
             })
         return jsonify({"groups": list(groups.values()), "total": len(items)})
 
@@ -348,7 +366,9 @@ def api_wrongbook():
             "qid": q.get("qid"),
             "questionIdx": w.get("question_idx"),
             "q": q["q"], "o": q["o"], "answer": q["a"], "explain": q["e"],
-            "myAnswer": w["chosen"], "answeredAt": w["answered_at"]
+            "myAnswer": w["chosen"], "answeredAt": w["answered_at"],
+            "mode": w.get("mode", "basic"), "modes": w.get("modes", []),
+            "fixed": bool(w.get("fixed")), "wrongTimes": w.get("wrong_times", 1),
         })
     return jsonify({"groups": list(groups.values()), "total": len(wrongs)})
 
