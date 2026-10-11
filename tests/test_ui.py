@@ -23,7 +23,7 @@ with sync_playwright() as p:
     # 开放注册后首页是登录页，先走匿名体验进主界面
     pg.locator("button:has-text('匿名体验')").click()
     pg.wait_for_timeout(1500)
-    ck("学生端首页加载（25 课）", pg.locator(".course-item").count()==25, str(pg.locator(".course-item").count()))
+    ck("学生端首页加载（39 课）", pg.locator(".course-item").count()==39, str(pg.locator(".course-item").count()))
     ck("学科分组 3 组", pg.locator(".subj-head").count()==3, str(pg.locator(".subj-head").count()))
     ck("底部导航 5 项", pg.locator(".nav").count()>=4, str(pg.locator(".nav").count()))
     ck("家长入口在顶部标题栏", pg.locator("#mainTopbar .admin-btn").count()==1)

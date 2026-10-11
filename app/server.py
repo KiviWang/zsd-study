@@ -38,6 +38,10 @@ init_db()
 
 # 题库播种：把 courses.py 里的题目同步进数据库（幂等，已存在的跳过）
 try:
+    # 先清理历史遗留课程（旧 h11/h12 合并、旧 h13-h15 前移后可能残留），再播种
+    _stale = bank.purge_legacy_courses(COURSES)
+    if _stale:
+        print(f"[题库] 已清理历史遗留课程：{', '.join(_stale)}")
     _added, _skipped = seed_from_courses(COURSES)
     if _added:
         print(f"[题库] 新导入 {_added} 道题（已存在 {_skipped} 道）")

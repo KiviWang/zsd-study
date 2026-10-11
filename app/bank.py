@@ -52,6 +52,31 @@ def _row_to_q(r):
 # =========================================================
 # 播种：把代码里的题库写入数据库（幂等，重复执行不会重复插入）
 # =========================================================
+def purge_legacy_courses(courses):
+    """
+    幂等清理：删除题库中"已不在当前 COURSES 里"的历史课程。
+
+    背景：人教版《中外历史纲要（上）》2024 版目录调整，原 h11/h12 被合并为
+    新的 h11，原 h13-h15 前移为 h12-h14，总课数由 25 变为 39。旧课程若
+    残留在 courses 表里，会继续出现在课程列表中，因此需要按 cid 差集清理。
+
+    只删 courses 表中多余的课程行，不动 questions/answers 表 —— 旧题的
+    qid 仍可通过错题本追溯，且清理是幂等的（重复执行结果一致）。
+    返回被清理的 cid 列表。
+    """
+    valid = {c["id"] for c in courses}
+    if not valid:
+        return []
+    try:
+        rows = query("SELECT cid FROM courses")
+    except Exception:
+        return []
+    stale = [r["cid"] for r in rows if r.get("cid") not in valid]
+    for cid in stale:
+        execute("DELETE FROM courses WHERE cid=?", (cid,))
+    return stale
+
+
 def seed_from_courses(courses):
     """
     从 courses.py 的 COURSES 结构导入题目。

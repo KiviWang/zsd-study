@@ -22,7 +22,7 @@ with sync_playwright() as p:
 
     # 1. 首页课程列表渲染
     items = pg.locator(".course-item").count()
-    check("课程列表渲染 4 项", items == 4, f"实际{items}")
+    check("课程列表渲染 39 项", items == 39, f"实际{items}")
 
     # 2. 总进度初始
     txt = pg.locator("#totalTxt").inner_text()

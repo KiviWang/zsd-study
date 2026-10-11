@@ -47,10 +47,10 @@ with sync_playwright() as p:
     pg.wait_for_timeout(1500)
     chk("首页标题", "政史地" in pg.title() or "政史地" in pg.content())
 
-    # 课程卡片（政治4 + 历史2 + 地理6 = 12）
+    # 课程卡片（政治4 + 历史29 + 地理6 = 39）
     pg.wait_for_selector(".course-item", state="attached", timeout=8000)
     n = pg.locator(".course-item").count()
-    chk("12个课程卡", n == 12, n)
+    chk("39个课程卡", n == 39, n)
     chk("学科分组标题出现", pg.locator(".subj-head").count() == 3,
         pg.locator(".subj-head").count())
 

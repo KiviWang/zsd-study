@@ -49,7 +49,7 @@ async def main():
         n = await page.locator(".subj-head").count()
         chk("学科分组 3 组", n == 3, str(n))
         cards = await page.locator(".course-item").count()
-        chk("课程卡 25 张", cards == 25, str(cards))
+        chk("课程卡 39 张", cards == 39, str(cards))
         b2 = await page.locator(".course-badge.b2").count()
         chk("两位数徽章 ≥10", b2 >= 10, str(b2))
         heads = [h.replace("\n", " ") for h in await page.locator(".subj-head").all_inner_texts()]
