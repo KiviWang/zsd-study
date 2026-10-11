@@ -93,16 +93,26 @@
     padding:14px 16px;margin-bottom:10px;box-shadow:var(--shadow);border:1px solid var(--line);
     cursor:pointer;transition:transform .12s}
   .course-item:active{transform:scale(.98)}
-  /* 学科分组标题（可点击折叠） */
-  .subj-head{display:flex;align-items:center;gap:7px;margin:16px 2px 9px;
-    cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent}
+  /* 学科分组标题：做成整条可点的按钮，加大热区与视觉提示 */
+  .subj-head{display:flex;align-items:center;gap:9px;margin:14px 0 10px;
+    padding:11px 13px;border-radius:12px;background:#f6f7fa;border:1px solid var(--line);
+    cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;
+    transition:background .15s,transform .12s}
   .subj-head:first-child{margin-top:2px}
-  .subj-head .sj-a{font-size:11px;color:var(--text3);width:11px;flex:0 0 auto}
-  .subj-head .sj-i{font-size:15px}
-  .subj-head b{font-size:14px;font-weight:700;letter-spacing:.5px}
-  .subj-head .sj-n{font-size:11px;color:var(--text3)}
-  .subj-head .sj-p{margin-left:auto;font-size:11px;color:var(--text3);
-    background:#eef1f5;border-radius:8px;padding:2px 8px}
+  .subj-head:active{transform:scale(.985);background:#eef1f6}
+  .subj-head .sj-a{font-size:13px;color:var(--text2);width:13px;flex:0 0 auto;
+    transition:transform .18s;display:inline-block}
+  .subj-head .sj-i{font-size:17px}
+  .subj-head b{font-size:16px;font-weight:700;letter-spacing:.5px}
+  .subj-head .sj-n{font-size:12px;color:var(--text3)}
+  .subj-head .sj-p{margin-left:auto;font-size:12px;color:var(--text2);
+    background:#fff;border:1px solid var(--line);border-radius:9px;padding:3px 9px;
+    font-weight:600}
+  /* 折叠提示：展开时提示"收起"，收起时提示"展开" */
+  .subj-head .sj-tip{font-size:11px;color:var(--brand);margin-left:auto;
+    padding:3px 8px;border-radius:9px;background:var(--brand-soft);flex:0 0 auto;
+    white-space:nowrap}
+  .subj-head .sj-p+.sj-tip{margin-left:7px}
   .course-badge{width:42px;height:42px;border-radius:12px;flex:0 0 auto;display:flex;
     align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:700}
   .course-badge.b2{font-size:12px;letter-spacing:-0.5px}
@@ -285,9 +295,11 @@
   .empty{text-align:center;color:var(--text3);font-size:13px;padding:40px 0;line-height:1.8}
   .hint{font-size:11.5px;color:var(--text3);line-height:1.6;margin-top:8px}
   .fade-note{font-size:11px;color:var(--text3);text-align:center;margin-top:14px;line-height:1.6}
+  /* 家长入口：做成小方块，不遮挡右侧操作按钮 */
   .admin-corner{position:fixed;right:12px;bottom:96px;z-index:55;background:#fff;
-    border:1px solid var(--line);border-radius:20px;padding:7px 13px;font-size:11px;
-    color:var(--text3);box-shadow:var(--shadow);text-decoration:none}
+    border:1px solid var(--line);border-radius:50%;width:38px;height:38px;
+    display:flex;align-items:center;justify-content:center;font-size:15px;
+    color:var(--text3);box-shadow:var(--shadow);text-decoration:none;opacity:.85}
   .loading{text-align:center;color:var(--text3);font-size:13px;padding:30px 0}
 </style>
 </head>
@@ -449,7 +461,7 @@
   </div>
 </div>
 
-<a class="admin-corner" href="/admin">家长入口 ›</a>
+<a class="admin-corner" href="/admin" title="家长入口">👤</a>
 
 <div class="navbar">
   <button class="nav on" data-scr="scrCourse" onclick="go('scrCourse')"><span class="ni">📚</span>课程</button>
@@ -781,6 +793,8 @@ function toggleFold(subj){
     body.style.display = m[subj] ? "none" : "";
     const a = head ? head.querySelector(".sj-a") : null;
     if(a) a.textContent = m[subj] ? "▸" : "▾";
+    const tip = head ? head.querySelector(".sj-tip") : null;
+    if(tip) tip.textContent = m[subj] ? "展开" : "收起";
   }
 }
 
@@ -813,6 +827,7 @@ async function loadCourses(){
         <span class="sj-i">${s.icon}</span><b>${esc(s.k)}</b>
         <span class="sj-n">${list.length} 课</span>
         <span class="sj-p">${done}/${tot}</span>
+        <span class="sj-tip">${folded?"展开":"收起"}</span>
       </div>
       <div class="subj-body" id="sb_${esc(s.k)}" style="${folded?"display:none":""}">` +
       list.map(c=>`
