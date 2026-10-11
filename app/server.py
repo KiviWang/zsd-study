@@ -23,6 +23,7 @@ from courses import COURSES, DAILY_PLAN, get_course
 import bank
 from bank import (seed_from_courses, get_questions, get_question, count_questions,
                   build_quiz, available_modes, MODE_BASIC, MODE_RANDOM)
+from bank import qid_by_idx as _resolve_qid_by_idx
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 app = Flask(__name__, static_folder=os.path.join(BASE, "static"), static_url_path="")
@@ -296,12 +297,13 @@ def api_answer():
     q = get_question(qid) if qid else None
     qi = data.get("questionIdx")
     if not q:
-        # 兼容旧调用：按下标取内置题目
+        # 兼容旧调用：按下标取题。此时尽量把 qid 补全为题库里同题对应的 qid，
+        # 否则同一道题会因 key 不同在错题本里重复出现（qid 与 idx: 两套 key）。
         c = get_course(cid)
         if qi is None or not (0 <= qi < len(c["quiz"])):
             return jsonify({"error": "invalid"}), 400
         q = c["quiz"][qi]
-        q = dict(q, qid=None)
+        q = dict(q, qid=_resolve_qid_by_idx(cid, qi, mode))
 
     if chosen is None:
         return jsonify({"error": "no answer"}), 400
@@ -406,7 +408,7 @@ def api_redo():
         c = get_course(cid)
         if qi is None or not (0 <= qi < len(c["quiz"])):
             return jsonify({"error": "invalid"}), 400
-        q = c["quiz"][qi]
+        q = dict(c["quiz"][qi], qid=_resolve_qid_by_idx(cid, qi, "basic"))
 
     if chosen is None:
         return jsonify({"error": "no answer"}), 400

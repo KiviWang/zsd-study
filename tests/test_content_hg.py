@@ -49,9 +49,9 @@ cs = d.get("courses", [])
 subjects = {}
 for c in cs:
     subjects.setdefault(c.get("subject", "政治"), []).append(c)
-chk("课程总数 = 12", len(cs) == 12, f"实际 {len(cs)}")
+chk("课程总数 = 25", len(cs) == 25, f"实际 {len(cs)}")
 chk("政治 4 课", len(subjects.get("政治", [])) == 4)
-chk("历史 2 课", len(subjects.get("历史", [])) == 2)
+chk("历史 15 课", len(subjects.get("历史", [])) == 15, f"实际 {len(subjects.get('历史', []))}")
 chk("地理 6 课", len(subjects.get("地理", [])) == 6)
 chk("每课都有 subject 字段", all("subject" in c for c in cs))
 chk("每课题数 20（基础10+强化10）", all(c.get("quizCount") == 20 for c in cs),
@@ -61,7 +61,7 @@ print()
 print("=" * 60)
 print("【2】各课内容完整性（知识点 / 视频 / 题库）")
 print("=" * 60)
-for cid in ["h1", "h2", "g1", "g2", "g3", "g4", "g5", "g6"]:
+for cid in ["h1", "h2", "h5", "h10", "h15", "g1", "g2", "g3", "g4", "g5", "g6"]:
     d, st = req(f"/api/course/{cid}")
     pts = d.get("points", [])
     vids = d.get("videos", [])
@@ -108,11 +108,11 @@ print("=" * 60)
 print("【5】题干与选项质量：无占位符、无乱码")
 print("=" * 60)
 allq = []
-for cid in ["h1", "h2", "g1", "g2", "g3", "g4", "g5", "g6"]:
+for cid in ["h1", "h2", "h5", "h10", "h15", "g1", "g2", "g3", "g4", "g5", "g6"]:
     for mode in ["basic", "random"]:
         d, _ = req(f"/api/course/{cid}?mode={mode}&limit=10", token=tk)
         allq += d.get("quiz", [])
-chk("累计取题 ≥150", len(allq) >= 150, str(len(allq)))
+chk("累计取题 ≥200", len(allq) >= 200, str(len(allq)))
 bad_word = [q for q in allq if any(w in json.dumps(q, ensure_ascii=False)
             for w in ["TODO", "占位", "待补", "restore"])]
 chk("无占位符/英文残留", len(bad_word) == 0, str([q["qid"] for q in bad_word[:5]]))

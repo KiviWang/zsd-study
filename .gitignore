@@ -7,3 +7,5 @@ backups/
 venv/
 *.log
 .DS_Store
+_shots/
+shots2/

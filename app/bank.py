@@ -171,6 +171,21 @@ def build_quiz(course_id, mode=MODE_BASIC, limit=None, tier=None):
     return qs[:limit] if limit else qs
 
 
+def qid_by_idx(course_id, idx, mode=MODE_BASIC):
+    """
+    按下标反查题库里的 qid（用于把"只传 questionIdx"的旧调用统一到 qid 主键）。
+
+    错题本按 qid 归并同一道题；若作答记录一半带 qid、一半只有 idx，
+    同一道题会重复出现。这里尽量补全 qid，补不上返回 None（退化为旧行为）。
+    """
+    if idx is None or idx < 0:
+        return None
+    qs = build_quiz(course_id, mode=mode)
+    if 0 <= idx < len(qs):
+        return qs[idx].get("qid")
+    return None
+
+
 def available_modes(course_id):
     """该课程可用的出题模式（供前端展示）"""
     basic = count_questions(course_id, TIER_BASIC)

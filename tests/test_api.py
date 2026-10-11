@@ -12,8 +12,8 @@ s = requests.Session()
 # ---------- 1. 学生端 API ----------
 r = s.get(f"{BASE}/api/courses")
 d = r.json()
-ck("课程列表返回 4 课", len(d["courses"]) == 4, f"{len(d['courses'])}")
-ck("课程含 quizCount=10", all(c["quizCount"]==10 for c in d["courses"]))
+ck("课程列表返回 25 课", len(d["courses"]) == 25, f"{len(d['courses'])}")
+ck("课程含 quizCount=20", all(c["quizCount"]==20 for c in d["courses"]))
 ck("初始进度为0", d["stats"]["total"] == 0)
 
 # 课程详情
@@ -52,17 +52,26 @@ ck("错题含原题与解析", all("q" in it and "explain" in it for it in g["it
 ck("错题含我的答案", all("myAnswer" in it for it in g["items"]))
 ck("错题第5题在列", any(it["questionIdx"]==4 for it in g["items"]))
 
-# ---------- 4. 错题重做（答对→移出错题本）----------
-r = s.post(f"{BASE}/api/redo", json={"courseId":"p1","questionIdx":4,"chosen":1})
+# ---------- 4. 错题重做（答对→保留但标记"已订正"）----------
+# 需求语义：错题答对后不消失，留在错题本里并标记 fixed=True，保留订正足迹
+d_course = s.get(f"{BASE}/api/course/p1").json()
+q4 = d_course["quiz"][4]
+r = s.post(f"{BASE}/api/redo", json={"courseId":"p1","qid":q4["qid"],"chosen":q4["a"]})
 ck("重做答对", r.json()["correct"]==True, str(r.json()["correct"]))
 wb2 = s.get(f"{BASE}/api/wrongbook").json()
-ck("错题本减为 1 道", wb2["total"]==1, str(wb2["total"]))
-ck("第5题已移出", not any(it["questionIdx"]==4 for it in (wb2["groups"][0]["items"] if wb2["groups"] else [])))
+ck("错题答对后仍保留（共 2 道）", wb2["total"]==2, str(wb2["total"]))
+_items4 = [it for g in wb2["groups"] for it in g["items"] if it.get("qid")==q4["qid"]]
+ck("第5题标记已订正", bool(_items4) and _items4[0]["fixed"] is True,
+   str(_items4[0]["fixed"] if _items4 else "缺失"))
 
 # 重做再答错
-r = s.post(f"{BASE}/api/redo", json={"courseId":"p1","questionIdx":5,"chosen":0})
+q5 = d_course["quiz"][5]
+r = s.post(f"{BASE}/api/redo", json={"courseId":"p1","qid":q5["qid"],"chosen":(q5["a"]+1)%4})
 ck("重做再错", r.json()["correct"]==False)
-ck("错题仍在错题本", s.get(f"{BASE}/api/wrongbook").json()["total"]==1)
+wb3 = s.get(f"{BASE}/api/wrongbook").json()
+ck("错题仍在错题本（共 2 道）", wb3["total"]==2, str(wb3["total"]))
+_i5 = [it for g in wb3["groups"] for it in g["items"] if it.get("qid")==q5["qid"]]
+ck("第6题未订正", bool(_i5) and _i5[0]["fixed"] is False, str(_i5[0]["fixed"] if _i5 else "缺失"))
 
 # ---------- 5. 计划打卡 ----------
 pl = s.get(f"{BASE}/api/plan").json()

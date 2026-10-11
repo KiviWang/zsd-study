@@ -93,15 +93,19 @@
     padding:14px 16px;margin-bottom:10px;box-shadow:var(--shadow);border:1px solid var(--line);
     cursor:pointer;transition:transform .12s}
   .course-item:active{transform:scale(.98)}
-  /* 学科分组标题 */
-  .subj-head{display:flex;align-items:center;gap:7px;margin:16px 2px 9px}
+  /* 学科分组标题（可点击折叠） */
+  .subj-head{display:flex;align-items:center;gap:7px;margin:16px 2px 9px;
+    cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent}
   .subj-head:first-child{margin-top:2px}
+  .subj-head .sj-a{font-size:11px;color:var(--text3);width:11px;flex:0 0 auto}
   .subj-head .sj-i{font-size:15px}
   .subj-head b{font-size:14px;font-weight:700;letter-spacing:.5px}
+  .subj-head .sj-n{font-size:11px;color:var(--text3)}
   .subj-head .sj-p{margin-left:auto;font-size:11px;color:var(--text3);
     background:#eef1f5;border-radius:8px;padding:2px 8px}
   .course-badge{width:42px;height:42px;border-radius:12px;flex:0 0 auto;display:flex;
     align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:700}
+  .course-badge.b2{font-size:12px;letter-spacing:-0.5px}
   .course-info{flex:1;min-width:0}
   .course-info .ct{font-size:14px;font-weight:600;margin:0;line-height:1.3}
   .course-info .cs{font-size:11px;color:var(--text3);margin:3px 0 0}
@@ -757,6 +761,29 @@ function go(scr){
 }
 
 /* ================= 课程列表 ================= */
+/* ================= 学科分组折叠 ================= */
+/* 折叠状态存本机，换设备不同步（学习偏好，无需上云） */
+const FOLD_KEY = "zsd_fold_subjects";
+function foldMap(){
+  try{ return JSON.parse(localStorage.getItem(FOLD_KEY)||"{}")||{}; }catch(e){ return {}; }
+}
+function isFolded(subj){
+  const m = foldMap();
+  return !!m[subj];
+}
+function toggleFold(subj){
+  const m = foldMap();
+  m[subj] = !m[subj];
+  try{ localStorage.setItem(FOLD_KEY, JSON.stringify(m)); }catch(e){}
+  const body = document.getElementById("sb_"+subj);
+  const head = body ? body.previousElementSibling : null;
+  if(body){
+    body.style.display = m[subj] ? "none" : "";
+    const a = head ? head.querySelector(".sj-a") : null;
+    if(a) a.textContent = m[subj] ? "▸" : "▾";
+  }
+}
+
 async function loadCourses(){
   const r = await api("/api/courses");
   const d = await r.json();
@@ -766,7 +793,7 @@ async function loadCourses(){
   const gname = (ME && ME.name) || d.studentName || "";
   $("greet").textContent = gname ? gname + "，今天想学哪一课？" : "今天想学哪一课？";
 
-  // 按学科分组渲染（政治 / 历史 / 地理）
+  // 按学科分组渲染（政治 / 历史 / 地理），支持点击折叠
   const SUBJ = [
     {k:"政治", icon:"🏛️"},
     {k:"历史", icon:"📜"},
@@ -780,18 +807,24 @@ async function loadCourses(){
     if(!list.length) return "";
     const done = list.reduce((a,c)=>a+c.right,0);
     const tot = list.reduce((a,c)=>a+c.quizCount,0);
-    return `<div class="subj-head"><span class="sj-i">${s.icon}</span><b>${esc(s.k)}</b>
-        <span class="sj-p">${done}/${tot}</span></div>` +
+    const folded = isFolded(s.k);
+    return `<div class="subj-head" onclick="toggleFold('${esc(s.k)}')">
+        <span class="sj-a">${folded?"▸":"▾"}</span>
+        <span class="sj-i">${s.icon}</span><b>${esc(s.k)}</b>
+        <span class="sj-n">${list.length} 课</span>
+        <span class="sj-p">${done}/${tot}</span>
+      </div>
+      <div class="subj-body" id="sb_${esc(s.k)}" style="${folded?"display:none":""}">` +
       list.map(c=>`
       <div class="course-item" onclick="openCourse('${c.id}')">
-        <div class="course-badge" style="background:${c.color}">${c.no.replace(/[第课\s]/g,"")}</div>
+        <div class="course-badge${c.no.replace(/[第课\s]/g,"").length>1?" b2":""}" style="background:${c.color}">${c.no.replace(/[第课\s]/g,"")}</div>
         <div class="course-info">
           <p class="ct">${esc(c.title)}</p>
           <p class="cs">${esc(c.subtitle)}</p>
         </div>
         <div class="course-prog"><b>${c.right}/${c.quizCount}</b>已答对</div>
         <div class="arrow">›</div>
-      </div>`).join("");
+      </div>`).join("") + `</div>`;
   }).join("");
 
   const tAll = COURSES.reduce((s,c)=>s+c.quizCount,0);
@@ -840,6 +873,7 @@ function renderPoints(c){
   $("tabPt").innerHTML = c.points.map(p=>`
     <div class="pt"><h3>${esc(p.head)}</h3>
       <div class="body">${p.body}</div>
+      ${p.svg ? `<div class="qfig">${p.svg}</div>` : ""}
       <div class="tip">💡 ${esc(p.tip)}</div>
     </div>`).join("") +
     `<div class="card" style="margin-top:14px"><h2>怎么用这几张卡？</h2>
@@ -1147,6 +1181,11 @@ async function redoPick(choice,el){
   if(g){
     const it = g.items.find(w=>(w.qid&&w.qid===qid) || (qid===null && w.questionIdx===qi));
     if(it){ it.fixed = !!d.correct; if(!it.modes.includes("redo")) it.modes.push("redo"); }
+    // 同步刷新这道题的标签，让「已订正」当场可见（不等下次整体重载）
+    if(d.correct){
+      const meta = item.querySelector(".meta");
+      if(meta) meta.innerHTML = modeTags(it);
+    }
   }
   const e = stage.querySelector(".exp");
   e.classList.add("show");

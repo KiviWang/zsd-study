@@ -40,9 +40,13 @@ def api(path, data=None, headers=None):
 
 
 def server_answer_count():
-    """直接从数据库数 answers 表行数（判断匿名有没有偷偷写库）"""
-    import sqlite3, glob
-    dbs = glob.glob("/tmp/zsdtest_data/*.db")
+    """直接从数据库数 answers 表行数（判断匿名有没有偷偷写库）
+
+    库位置优先取 ZSD_SQLITE_DIR（与启动服务时一致），否则回退到历史默认目录。
+    """
+    import sqlite3, glob, os
+    d = os.environ.get("ZSD_SQLITE_DIR") or "/tmp/zsdtest_data"
+    dbs = glob.glob(os.path.join(d, "*.db"))
     if not dbs:
         return 0
     c = sqlite3.connect(dbs[0])

@@ -32,26 +32,33 @@ class MockTurso(BaseHTTPRequestHandler):
 
             if up.startswith("INSERT"):
                 DB["next_id"] += 1
-                results.append({"type":"ok","response":{"result":{
+                results.append({"type":"ok","response":{"type":"execute","result":{
                     "cols":[], "rows":[], "affected_row_count":1,
                     "last_insert_rowid":DB["next_id"]}}})
             elif up.startswith("DELETE") or up.startswith("UPDATE") or up.startswith("CREATE"):
-                results.append({"type":"ok","response":{"result":{
+                results.append({"type":"ok","response":{"type":"execute","result":{
                     "cols":[], "rows":[], "affected_row_count":1,
                     "last_insert_rowid":None}}})
             elif up.startswith("SELECT"):
                 # 返回一行模拟数据，验证类型转换
-                results.append({"type":"ok","response":{"result":{
-                    "cols":[{"name":"id"},{"name":"name"},{"name":"score"},{"name":"ok"}],
-                    "rows":[[
-                        {"type":"integer","value":"42"},
-                        {"type":"text","value":"测试"},
-                        {"type":"float","value":"3.5"},
-                        {"type":"null","value":None},
-                    ]],
-                    "affected_row_count":0, "last_insert_rowid":None}}})
+                # 只在测试用表 t 上返回模拟数据；业务表结构不同，
+                # 返回空结果集避免列名不匹配（migrate 探测 PRAGMA 等）
+                if "FROM T" in up or "FROM `T`" in up:
+                    results.append({"type":"ok","response":{"type":"execute","result":{
+                        "cols":[{"name":"id"},{"name":"name"},{"name":"score"},{"name":"ok"}],
+                        "rows":[[
+                            {"type":"integer","value":"42"},
+                            {"type":"text","value":"测试"},
+                            {"type":"float","value":"3.5"},
+                            {"type":"null","value":None},
+                        ]],
+                        "affected_row_count":0, "last_insert_rowid":None}}})
+                else:
+                    results.append({"type":"ok","response":{"type":"execute","result":{
+                        "cols":[], "rows":[], "affected_row_count":0,
+                        "last_insert_rowid":None}}})
             else:
-                results.append({"type":"ok","response":{"result":{
+                results.append({"type":"ok","response":{"type":"execute","result":{
                     "cols":[], "rows":[], "affected_row_count":0,
                     "last_insert_rowid":None}}})
 
@@ -110,11 +117,18 @@ res = db.execute("INSERT INTO t VALUES(?)", ("x",))
 ck("execute 返回 last_id", res.get("last_id") == 2, str(res))
 
 # 测试业务函数（走 Turso 分支）
-try:
-    db.init_db()
-    ck("init_db 在 Turso 模式可执行", True)
-except Exception as e:
-    ck("init_db 在 Turso 模式可执行", False, str(e))
+# mock server 是 daemon 线程，需等端口就绪（最多 ~3s），否则会 Connection refused
+import time as _time
+_last = None
+for _ in range(30):
+    try:
+        db.init_db()
+        _last = True
+        break
+    except Exception as e:
+        _last = e
+        _time.sleep(0.1)
+ck("init_db 在 Turso 模式可执行", _last is True, "" if _last is True else repr(_last))
 
 print("\n" + "="*50)
 ok = sum(1 for _,c,_ in results if c)
