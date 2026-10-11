@@ -77,9 +77,26 @@ Turso 通过 HTTP API 调用，不依赖额外第三方库。
 ├── data/              # 本地数据库目录
 ├── requirements.txt
 ├── wsgi.py            # PythonAnywhere WSGI 入口
+├── backup_db.py       # 数据库每日备份脚本（推送到 GitHub 私有仓库）
 ├── render.yaml        # Render 部署配置（备选）
 └── 部署说明.md
 ```
+
+## 数据备份
+
+`backup_db.py` 可将数据库压缩后自动上传到 GitHub **私有仓库**，并只保留最近 N 份。
+
+```bash
+# 检查配置与连通性（不实际备份）
+BACKUP_REPO=用户名/仓库名 BACKUP_TOKEN=ghp_xxx python3 backup_db.py --check
+
+# 执行备份
+BACKUP_REPO=用户名/仓库名 BACKUP_TOKEN=ghp_xxx BACKUP_KEEP=30 python3 backup_db.py
+```
+
+搭配 PythonAnywhere 的 **Tasks** 功能可每天自动执行，详见 `部署说明.md` 第十节。
+
+> ⚠️ 备份必须指向 **Private 私有仓库**，否则学习记录会公开可见。
 
 ## 扩展科目
 
