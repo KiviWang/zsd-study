@@ -55,6 +55,15 @@
     border:1px solid var(--line);border-radius:12px;color:var(--text2);cursor:pointer;
     font-family:inherit;transition:all .15s;white-space:nowrap}
   .tab.on{background:var(--text);color:#fff;border-color:var(--text);font-weight:600}
+  .modebar{display:flex;gap:8px;margin-bottom:12px}
+  .modebtn{flex:1;display:flex;flex-direction:column;gap:2px;padding:10px 12px;background:#fff;
+    border:1.5px solid var(--line);border-radius:12px;cursor:pointer;font-family:inherit;
+    text-align:left;transition:all .15s}
+  .modebtn b{font-size:13px;color:var(--text)}
+  .modebtn span{font-size:11px;color:var(--text3);line-height:1.4}
+  .modebtn.on{border-color:var(--brand);background:var(--brand-soft)}
+  .modebtn.on b{color:var(--brand)}
+  .modebtn.on span{color:var(--brand);opacity:.8}
   .pt{background:#fff;border-radius:16px;padding:14px 16px;margin-bottom:10px;
     border:1px solid var(--line);box-shadow:var(--shadow)}
   .pt h3{font-size:14px;margin:0 0 7px;font-weight:600;display:flex;gap:6px}
@@ -428,10 +437,29 @@ async function watchVideo(cid,name,kw){
 }
 
 /* ================= 自测 ================= */
+/* 模式选择条：基础巩固（固定题）/ 随机练习（每次不同） */
+function renderModeBar(c){
+  if(!c.modes || c.modes.length<2) return "";
+  return `<div class="modebar">
+    ${c.modes.map(m=>`<button class="modebtn ${m.mode===c.mode?'on':''}"
+      onclick="switchMode('${m.mode}')">
+      <b>${esc(m.label)}</b><span>${esc(m.desc)} · ${m.count}题</span></button>`).join("")}
+  </div>`;
+}
+
+async function switchMode(mode){
+  const r = await fetch(`/api/course/${CUR.id}?mode=${mode}`);
+  CUR = await r.json();
+  renderQuiz(CUR);
+  window.scrollTo(0,0);
+}
+
 function renderQuiz(c){
-  const mine = c.myAnswers || {};
-  $("tabQz").innerHTML = c.quiz.map((q,i)=>{
-    const rec = mine[String(i)];
+  const mine = (c.myAnswers && c.myAnswers.byQid) || {};
+  const byIdx = (c.myAnswers && c.myAnswers.byIdx) || {};
+  $("tabQz").innerHTML = renderModeBar(c) + c.quiz.map((q,i)=>{
+    // 优先按 qid 恢复已答状态，兜底按下标（兼容历史记录）
+    const rec = (q.qid && mine[q.qid]) || byIdx[String(i)];
     const done = !!rec;
     return `<div class="qbox" id="q_${i}" ${done?'data-locked="1"':""}>
       <div class="qnum">第 ${i+1} 题 / ${c.quiz.length}</div>
@@ -460,7 +488,7 @@ async function resetQuiz(){
   if(!confirm("确定要清空本课的作答记录吗？")) return;
   await fetch("/api/course/reset",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({courseId:CUR.id})});
-  const r = await fetch("/api/course/"+CUR.id);
+  const r = await fetch("/api/course/"+CUR.id+(CUR.mode?`?mode=${CUR.mode}`:""));
   CUR = await r.json();
   renderQuiz(CUR);
   loadCourses();
@@ -470,8 +498,9 @@ async function answer(qi,choice){
   const box = $("q_"+qi);
   if(box.dataset.locked) return;
   box.dataset.locked = "1";
+  const q = CUR.quiz[qi];
   const r = await fetch("/api/answer",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({courseId:CUR.id,questionIdx:qi,chosen:choice})});
+    body:JSON.stringify({courseId:CUR.id,qid:q.qid,questionIdx:qi,chosen:choice,mode:CUR.mode||"basic"})});
   const d = await r.json();
   const opts = box.querySelectorAll(".opt");
   opts.forEach((o,j)=>{
@@ -543,32 +572,38 @@ async function loadWrong(){
             <p class="mine">你选的是：${"ABCD"[it.myAnswer]}． ${esc(it.o[it.myAnswer]||"")}</p>
             <p class="right">正确答案：${"ABCD"[it.answer]}． ${esc(it.o[it.answer])}</p>
             <p class="wexp">💡 ${esc(it.explain)}</p>
-            <button class="redo" onclick="redo('${g.courseId}',${it.questionIdx},this)">重做这道题</button>
+            <button class="redo" onclick="redo('${g.courseId}','${it.qid||""}',${it.questionIdx===null?'null':it.questionIdx},this)">重做这道题</button>
             <div class="redo-area"></div>
           </div>`).join("")}
       </div>
     </div>`).join("");
 }
 
-async function redo(cid,qi,btn){
+async function redo(cid,qid,qi,btn){
   const item = btn.closest(".wq");
   const area = item.querySelector(".redo-area");
   const c = await (await fetch("/api/course/"+cid)).json();
-  const q = c.quiz[qi];
+  const q = qid ? c.quiz.find(x=>x.qid===qid) : c.quiz[qi];
+  if(!q){ area.innerHTML = "<p class='hint'>题目已更新，请刷新后重试</p>"; return; }
+  item.dataset.redoQid = q.qid || "";
+  item.dataset.redoIdx = qi===null ? "" : qi;
   area.innerHTML = `<div style="margin-top:10px">
       <p style="font-size:12px;color:var(--text3);margin:0 0 8px">请重新选择答案：</p>
-      ${q.o.map((o,j)=>`<div class="opt" onclick="redoPick('${cid}',${qi},${j},this)">
+      ${q.o.map((o,j)=>`<div class="opt" onclick="redoPick('${cid}',${j},this)">
         <span class="key">${"ABCD"[j]}</span><span>${esc(o)}</span></div>`).join("")}
       <div class="exp"></div>
     </div>`;
   btn.style.display = "none";
 }
 
-async function redoPick(cid,qi,choice,el){
+async function redoPick(cid,choice,el){
   const area = el.parentElement;
+  const item = el.closest(".wq");
   area.querySelectorAll(".opt").forEach(o=>{o.classList.add("locked");o.removeAttribute("onclick");});
   const r = await fetch("/api/redo",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({courseId:cid,questionIdx:qi,chosen:choice})});
+    body:JSON.stringify({courseId:cid,qid:item.dataset.redoQid||null,
+      questionIdx:item.dataset.redoIdx===""?null:Number(item.dataset.redoIdx),
+      chosen:choice})});
   const d = await r.json();
   const opts = area.querySelectorAll(".opt");
   opts.forEach((o,j)=>{

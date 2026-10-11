@@ -154,14 +154,43 @@ def _ensure_dir():
 # 建表（两种后端通用）
 # =========================================================
 SCHEMA = [
+    # ---- 题库（内容与逻辑分离：题目存库，可动态增删/随机抽题）----
+    """CREATE TABLE IF NOT EXISTS questions (
+        qid        TEXT PRIMARY KEY,
+        course_id  TEXT NOT NULL,
+        subject    TEXT NOT NULL DEFAULT '政治',
+        tier       TEXT NOT NULL DEFAULT 'basic',
+        qtype      TEXT NOT NULL DEFAULT 'choice',
+        stem       TEXT NOT NULL,
+        options    TEXT NOT NULL,
+        answer     INTEGER NOT NULL,
+        explain    TEXT DEFAULT '',
+        sort_order INTEGER DEFAULT 0,
+        active     INTEGER DEFAULT 1,
+        created_at TEXT NOT NULL
+    )""",
+    # ---- 课程元信息（原来写死在 courses.py 的课程列表，改为可入库）----
+    """CREATE TABLE IF NOT EXISTS courses (
+        cid        TEXT PRIMARY KEY,
+        no         TEXT NOT NULL,
+        subject    TEXT NOT NULL DEFAULT '政治',
+        title      TEXT NOT NULL,
+        subtitle   TEXT DEFAULT '',
+        color      TEXT DEFAULT '#2f6fed',
+        sort_order INTEGER DEFAULT 0,
+        active     INTEGER DEFAULT 1
+    )""",
+    # ---- 答题记录（新增 qid 列，指向题库；question_idx 保留兼容）----
     """CREATE TABLE IF NOT EXISTS answers (
         id           INTEGER PRIMARY KEY AUTOINCREMENT,
         student_id   TEXT NOT NULL DEFAULT 'default',
         course_id    TEXT NOT NULL,
-        question_idx INTEGER NOT NULL,
+        question_idx INTEGER,
+        qid          TEXT,
         chosen       INTEGER NOT NULL,
         correct      INTEGER NOT NULL,
-        answered_at  TEXT NOT NULL
+        answered_at  TEXT NOT NULL,
+        mode         TEXT DEFAULT 'basic'
     )""",
     """CREATE TABLE IF NOT EXISTS sessions (
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -193,14 +222,41 @@ SCHEMA = [
 ]
 
 
+def _columns_of(table):
+    """取表的现有列名集合（兼容 SQLite / Turso）"""
+    try:
+        rows = query(f"PRAGMA table_info({table})")
+        return {r.get("name") for r in rows}
+    except Exception:
+        return set()
+
+
+def _migrate():
+    """
+    兼容旧数据库：给已存在的表补上新增列。
+    CREATE TABLE IF NOT EXISTS 不会给旧表加列，所以必须显式 ALTER。
+    """
+    # answers 表新增 qid / mode（历史数据该列为 NULL，不影响读取）
+    cols = _columns_of("answers")
+    if cols:
+        if "qid" not in cols:
+            execute("ALTER TABLE answers ADD COLUMN qid TEXT")
+        if "mode" not in cols:
+            execute("ALTER TABLE answers ADD COLUMN mode TEXT DEFAULT 'basic'")
+
+
 def init_db():
     """初始化表结构与默认配置"""
     for stmt in SCHEMA:
         execute(stmt)
+    _migrate()   # 兼容旧库：补齐新增列
     execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_task_done_unique "
             "ON task_done(student_id, day_no, task_idx)")
     execute("CREATE INDEX IF NOT EXISTS idx_answers_stu ON answers(student_id)")
     execute("CREATE INDEX IF NOT EXISTS idx_sessions_stu ON sessions(student_id)")
+    # 题库索引
+    execute("CREATE INDEX IF NOT EXISTS idx_q_course ON questions(course_id, tier, active)")
+    execute("CREATE INDEX IF NOT EXISTS idx_answers_qid ON answers(student_id, qid)")
 
     execute("INSERT OR IGNORE INTO config(key,value) VALUES(?,?)", ("admin_password", "888888"))
     execute("INSERT OR IGNORE INTO config(key,value) VALUES(?,?)", ("student_name", "同学"))
@@ -224,12 +280,14 @@ def set_config(key, value):
 # =========================================================
 # 答题
 # =========================================================
-def record_answer(course_id, question_idx, chosen, correct, student_id="default"):
+def record_answer(course_id, question_idx, chosen, correct, student_id="default",
+                  qid=None, mode="basic"):
+    """记录一次作答。qid 指向题库（推荐），question_idx 保留兼容旧调用。"""
     execute(
-        "INSERT INTO answers(student_id,course_id,question_idx,chosen,correct,answered_at) "
-        "VALUES(?,?,?,?,?,?)",
-        (student_id, course_id, question_idx, chosen, 1 if correct else 0,
-         datetime.now().isoformat(timespec="seconds"))
+        "INSERT INTO answers(student_id,course_id,question_idx,qid,chosen,correct,answered_at,mode) "
+        "VALUES(?,?,?,?,?,?,?,?)",
+        (student_id, course_id, question_idx, qid, chosen, 1 if correct else 0,
+         datetime.now().isoformat(timespec="seconds"), mode)
     )
 
 
@@ -238,43 +296,78 @@ def reset_course_answers(course_id, student_id="default"):
             (student_id, course_id))
 
 
-def _latest_answers_where(where_extra="", params=()):
-    """取每题最近一次作答（用子查询兼容两种数据库）"""
-    sql = """
-        SELECT a.* FROM answers a
-        INNER JOIN (
-            SELECT course_id, question_idx, MAX(id) AS max_id
-            FROM answers WHERE student_id=?
-            GROUP BY course_id, question_idx
-        ) t ON a.id = t.max_id
-        WHERE a.student_id = ? %s
-    """ % where_extra
+def _latest_answers_where(where_extra="", params=(), by_qid=True):
+    """
+    取每题最近一次作答。
+    by_qid=True  → 按 qid 分组（题库模式，题目顺序变化也不受影响）
+    by_qid=False → 按 question_idx 分组（兼容未迁移的历史数据）
+    """
+    if by_qid:
+        sql = """
+            SELECT a.* FROM answers a
+            INNER JOIN (
+                SELECT qid, MAX(id) AS max_id
+                FROM answers WHERE student_id=? AND qid IS NOT NULL
+                GROUP BY qid
+            ) t ON a.id = t.max_id
+            WHERE a.student_id = ? %s
+        """ % where_extra
+    else:
+        sql = """
+            SELECT a.* FROM answers a
+            INNER JOIN (
+                SELECT course_id, question_idx, MAX(id) AS max_id
+                FROM answers WHERE student_id=? AND qid IS NULL
+                GROUP BY course_id, question_idx
+            ) t ON a.id = t.max_id
+            WHERE a.student_id = ? %s
+        """ % where_extra
     return query(sql, tuple(params))
 
 
 def get_course_answers(course_id, student_id="default"):
+    """
+    取本课每题最近一次作答状态。
+    返回 {"byQid": {qid: {...}}, "byIdx": {idx: {...}}}
+      后端的题目列表可直接用 byQid[qid] / byIdx[str(i)] 恢复页面已答状态。
+    """
     rows = query("""
-        SELECT a.question_idx, a.chosen, a.correct FROM answers a
+        SELECT a.qid, a.question_idx, a.chosen, a.correct FROM answers a
         INNER JOIN (
-            SELECT question_idx, MAX(id) AS max_id FROM answers
+            SELECT COALESCE(qid, 'idx:' || course_id || ':' || question_idx) AS k,
+                   MAX(id) AS max_id
+            FROM answers
             WHERE student_id=? AND course_id=?
-            GROUP BY question_idx
+            GROUP BY k
         ) t ON a.id = t.max_id
         WHERE a.student_id=? AND a.course_id=?
     """, (student_id, course_id, student_id, course_id))
-    return {str(r["question_idx"]): {"chosen": r["chosen"], "correct": bool(r["correct"])}
-            for r in rows}
+    by_qid, by_idx = {}, {}
+    for r in rows:
+        info = {"chosen": r["chosen"], "correct": bool(r["correct"])}
+        if r.get("qid"):
+            by_qid[r["qid"]] = info
+        if r.get("question_idx") is not None:
+            by_idx[str(r["question_idx"])] = info
+    return {"byQid": by_qid, "byIdx": by_idx}
+
+
+def _all_latest_answers(student_id="default", where_extra=""):
+    """合并"按qid"与"按idx"两条路径的最新作答，避免遗漏历史数据"""
+    a = _latest_answers_where(where_extra, (student_id, student_id), by_qid=True)
+    b = _latest_answers_where(where_extra, (student_id, student_id), by_qid=False)
+    return a + b
 
 
 def get_wrong_questions(student_id="default"):
-    rows = _latest_answers_where("AND a.correct = 0",
-                                 (student_id, student_id))
+    """错题（合并题库模式与历史模式）"""
+    rows = _all_latest_answers(student_id, "AND a.correct = 0")
     rows.sort(key=lambda r: r.get("answered_at") or "", reverse=True)
     return rows
 
 
 def get_stats(student_id="default"):
-    rows = _latest_answers_where("", (student_id, student_id))
+    rows = _all_latest_answers(student_id)
     by_course = {}
     total = 0
     right = 0
