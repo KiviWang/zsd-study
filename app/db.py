@@ -185,6 +185,8 @@ SCHEMA = [
         options    TEXT NOT NULL,
         answer     INTEGER NOT NULL,
         explain    TEXT DEFAULT '',
+        img        TEXT DEFAULT '',
+        svg        TEXT DEFAULT '',
         sort_order INTEGER DEFAULT 0,
         active     INTEGER DEFAULT 1,
         created_at TEXT NOT NULL
@@ -275,6 +277,14 @@ def _migrate():
             execute("ALTER TABLE students ADD COLUMN password_hash TEXT")
         if "is_anonymous" not in cols:
             execute("ALTER TABLE students ADD COLUMN is_anonymous INTEGER DEFAULT 0")
+
+    # questions 表新增图片/示意图字段（老题目这两列为空，正常显示）
+    cols = _columns_of("questions")
+    if cols:
+        if "img" not in cols:
+            execute("ALTER TABLE questions ADD COLUMN img TEXT DEFAULT ''")
+        if "svg" not in cols:
+            execute("ALTER TABLE questions ADD COLUMN svg TEXT DEFAULT ''")
 
 
 def init_db():
@@ -955,6 +965,7 @@ def anon_wrong_questions(payload):
             "courseTitle": _course_title(q["course_id"]),
             "stem": q["stem"], "options": q["options"],
             "answer": q["answer"], "explain": q.get("explain", ""),
+            "img": q.get("img", ""), "svg": q.get("svg", ""),
             "chosen": r["chosen"], "answered_at": r["answered_at"],
             "mode": r.get("mode") or "basic",
             "fixed": bool(latest.get("correct")),
@@ -978,7 +989,8 @@ def _get_question_row(qid):
     except (ValueError, TypeError):
         options = []
     return {"qid": r["qid"], "course_id": r["course_id"], "stem": r["stem"],
-            "options": options, "answer": r["answer"], "explain": r.get("explain", "")}
+            "options": options, "answer": r["answer"], "explain": r.get("explain", ""),
+            "img": r.get("img") or "", "svg": r.get("svg") or ""}
 
 
 def anon_study_time(payload, days=7):

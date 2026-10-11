@@ -37,12 +37,15 @@ def _row_to_q(r):
     return {
         "qid": r["qid"],
         "courseId": r["course_id"],
+        "subject": r.get("subject", "政治"),
         "tier": r.get("tier", TIER_BASIC),
         "qtype": r.get("qtype", "choice"),
         "q": r["stem"],
         "o": options,
         "a": r["answer"],
         "e": r.get("explain", ""),
+        "img": r.get("img") or "",
+        "svg": r.get("svg") or "",
     }
 
 
@@ -83,10 +86,12 @@ def seed_from_courses(courses):
                     continue
                 execute(
                     "INSERT INTO questions(qid,course_id,subject,tier,qtype,stem,options,answer,"
-                    "explain,sort_order,active,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,1,?)",
-                    (qid, cid, c.get("subject", "政治"), tier, "choice",
+                    "explain,img,svg,sort_order,active,created_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,?)",
+                    (qid, cid, c.get("subject", "政治"), tier,
+                     q.get("qtype", "choice"),
                      q["q"], json.dumps(q["o"], ensure_ascii=False), q["a"],
-                     q.get("e", ""), i, now)
+                     q.get("e", ""), q.get("img", ""), q.get("svg", ""), i, now)
                 )
                 added += 1
     return added, skipped

@@ -233,6 +233,7 @@ def api_courses():
         out.append({
             "id": c["id"], "no": c["no"], "title": c["title"],
             "subtitle": c["subtitle"], "color": c["color"],
+            "subject": c.get("subject", "政治"),
             "quizCount": count_questions(c["id"]) or len(c["quiz"]),
             "answered": cs["total"],
             "right": cs["right"]
@@ -338,6 +339,7 @@ def api_wrongbook():
                 "qid": it["qid"], "questionIdx": None,
                 "q": it["stem"], "o": it["options"],
                 "answer": it["answer"], "explain": it["explain"],
+                "img": it.get("img", ""), "svg": it.get("svg", ""),
                 "myAnswer": it["chosen"], "answeredAt": it["answered_at"],
                 "mode": it.get("mode", "basic"), "modes": [it.get("mode", "basic")],
                 "fixed": False, "wrongTimes": 1,
@@ -366,6 +368,7 @@ def api_wrongbook():
             "qid": q.get("qid"),
             "questionIdx": w.get("question_idx"),
             "q": q["q"], "o": q["o"], "answer": q["a"], "explain": q["e"],
+            "img": q.get("img", ""), "svg": q.get("svg", ""),
             "myAnswer": w["chosen"], "answeredAt": w["answered_at"],
             "mode": w.get("mode", "basic"), "modes": w.get("modes", []),
             "fixed": bool(w.get("fixed")), "wrongTimes": w.get("wrong_times", 1),

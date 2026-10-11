@@ -1,10 +1,18 @@
 """
-政史地学习平台 · 课程数据
-人教版 · 政治必修1《中国特色社会主义》
-视频条目含：优先级（必看/选看/补充）+ 时间戳片段
+政史地学习平台 · 课程数据（汇总入口）
+
+  · 政治：本文件内的 COURSES_POLITICS（人教版必修1）
+  · 历史：courses_history.HISTORY_COURSES（中外历史纲要上）
+  · 地理：courses_geo.GEO_COURSES（地理必修第一册）
+
+最终对外暴露 COURSES（政治 + 历史 + 地理），供 bank.py 播种与 server.py 使用。
+视频条目含：优先级（必看/选看/补充）+ 时间戳片段；题目可选带 svg / img。
 """
 
-COURSES = [
+from courses_history import HISTORY_COURSES
+from courses_geo import GEO_COURSES
+
+COURSES_POLITICS = [
 {
   "id": "p1", "no": "第 1 课", "subject": "政治",
   "title": "社会主义从空想到科学、从理论到实践的发展",
@@ -247,6 +255,12 @@ DAILY_PLAN = [
   {"day": 9, "cid": "", "cname": "综合复习 · 易错点清扫", "tasks": ["把四课的'易错点'过一遍", "错题本重做", "做一次综合自测"]},
   {"day": 10, "cid": "", "cname": "综合复习 · 考前冲刺", "tasks": ["尝试不看卡片复述四课主线", "整理自己的错题本", "准备迎接月考"]}
 ]
+
+# ---------------------------------------------------------
+# 汇总：政治 + 历史 + 地理
+# 顺序即前端课程列表顺序（政治 → 历史 → 地理）
+# ---------------------------------------------------------
+COURSES = COURSES_POLITICS + HISTORY_COURSES + GEO_COURSES
 
 
 def get_course(cid):
