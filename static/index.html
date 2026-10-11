@@ -45,7 +45,27 @@
   .login-btn:active{opacity:.85}
   .login-btn:disabled{opacity:.5}
   .login-msg{font-size:12.5px;color:var(--brand);min-height:18px;margin:10px 0 0}
+  .login-msg.err{color:var(--red,#e8524a)}
   .login-hint{font-size:11.5px;color:var(--text3);margin:14px 0 0}
+  .login-hint a{color:var(--brand);text-decoration:none}
+  /* ---- 登录页：双标签（登录/注册） ---- */
+  .lg-tabs{display:flex;gap:4px;background:#f1f3f6;border-radius:12px;padding:4px;margin:0 0 18px}
+  .lg-tab{flex:1;padding:9px 0;font-size:14px;font-weight:600;font-family:inherit;
+    border:none;border-radius:9px;background:transparent;color:var(--text3);cursor:pointer;
+    transition:all .15s}
+  .lg-tab.on{background:#fff;color:var(--text);box-shadow:0 1px 4px rgba(30,35,45,.10)}
+  #formLogin .login-input+.login-input,
+  #formReg .login-input+.login-input{margin-top:10px}
+  #codeLoginBox .login-input{margin-top:10px}
+  .login-divider{display:flex;align-items:center;gap:10px;margin:18px 0 0;
+    font-size:11.5px;color:var(--text3)}
+  .login-divider::before,.login-divider::after{content:"";flex:1;height:1px;background:var(--line)}
+  .login-btn.ghost{background:#fff;color:var(--text2,#5a6473);border:1.5px solid var(--line)}
+  .login-btn.ghost:active{background:#f7f8fa}
+  /* ---- 匿名提示条 ---- */
+  .anon-tip{background:#fff8e6;border:1px solid #f2dfa8;color:#8a6d1f;
+    border-radius:12px;padding:11px 14px;font-size:12px;line-height:1.55;margin-bottom:12px}
+  .anon-tip a{color:#8a6d1f;font-weight:600;text-decoration:none}
   /* ---- 顶部学生标识 ---- */
   .who{display:flex;align-items:center;gap:3px;padding:5px 10px;border-radius:10px;
     background:#fff;border:1px solid var(--line);cursor:pointer;flex:0 0 auto;max-width:110px}
@@ -231,12 +251,48 @@
     <div class="login-card">
       <div class="logo-big">政</div>
       <h2>政史地学习</h2>
-      <p class="login-sub">输入你的登录码，开始学习</p>
-      <input class="login-input" id="loginCode" placeholder="登录码（如 xiaoming）"
-        autocomplete="username" autocapitalize="none" spellcheck="false">
-      <button class="login-btn" onclick="doLogin()">进入学习</button>
+      <p class="login-sub" id="loginSub">登录后开始学习，进度自动保存</p>
+
+      <!-- 登录 / 注册 切换 -->
+      <div class="lg-tabs">
+        <button class="lg-tab on" id="tabLogin" onclick="switchLoginTab('login')">登录</button>
+        <button class="lg-tab" id="tabReg" onclick="switchLoginTab('reg')">注册</button>
+      </div>
+
+      <!-- 登录表单 -->
+      <div id="formLogin">
+        <input class="login-input" id="loginUser" placeholder="用户名"
+          autocomplete="username" autocapitalize="none" spellcheck="false">
+        <input class="login-input" id="loginPwd" type="password" placeholder="密码"
+          autocomplete="current-password">
+        <button class="login-btn" onclick="doLoginPwd()">登录</button>
+      </div>
+
+      <!-- 注册表单 -->
+      <div id="formReg" style="display:none">
+        <input class="login-input" id="regUser" placeholder="用户名（3-20位字母/数字/下划线）"
+          autocomplete="username" autocapitalize="none" spellcheck="false">
+        <input class="login-input" id="regPhone" type="tel" placeholder="手机号"
+          inputmode="numeric" maxlength="11">
+        <input class="login-input" id="regName" placeholder="姓名">
+        <input class="login-input" id="regPwd" type="password" placeholder="密码（至少6位）"
+          autocomplete="new-password">
+        <button class="login-btn" onclick="doRegister()">注册并开始学习</button>
+      </div>
+
       <p class="login-msg" id="loginMsg"></p>
-      <p class="login-hint">第一次用？找家长要一个登录码。</p>
+
+      <div class="login-divider"><span>或者</span></div>
+      <button class="login-btn ghost" onclick="doAnonymous()">先随便看看（匿名体验）</button>
+
+      <p class="login-hint">
+        已有登录码？<a href="javascript:void(0)" onclick="toggleCodeLogin()">用登录码进入</a>
+      </p>
+      <div id="codeLoginBox" style="display:none">
+        <input class="login-input" id="loginCode" placeholder="登录码（如 xiaoming）"
+          autocomplete="off" autocapitalize="none" spellcheck="false">
+        <button class="login-btn ghost" onclick="doLogin()">用登录码进入</button>
+      </div>
     </div>
   </div>
 </div>
@@ -269,6 +325,10 @@
 <!-- 课程 -->
 <div class="screen active" id="scrCourse">
   <div class="wrap">
+    <div class="anon-tip" id="anonTip" style="display:none">
+      你现在是<strong>匿名体验</strong>，作答只保存在这台手机里，换设备就看不到。
+      <a href="javascript:void(0)" onclick="doLogout()">注册/登录以永久保存 &rsaquo;</a>
+    </div>
     <div class="card">
       <h2 id="greet">今天想学哪一课？</h2>
       <p class="sub">每课约 20~30 分钟：先看片 → 再看卡片 → 最后自测</p>
@@ -358,43 +418,179 @@ const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&g
 
 /* ================= 身份 / 登录 ================= */
 const TOKEN_KEY = "zsd_token";
-let ME = null;   // 当前学生 {sid,name,color}
+const ANON_KEY  = "zsd_anon";     // 匿名模式标记（本地隔离）
+let ME = null;   // 当前学生 {sid,name,color,...}
 
 function getToken(){ try{ return localStorage.getItem(TOKEN_KEY)||""; }catch(e){ return ""; } }
 function setToken(t){ try{ localStorage.setItem(TOKEN_KEY, t); }catch(e){} }
 function clearToken(){ try{ localStorage.removeItem(TOKEN_KEY); }catch(e){} }
+function isAnon(){ try{ return localStorage.getItem(ANON_KEY)==="1"; }catch(e){ return false; } }
+function setAnon(v){ try{ v ? localStorage.setItem(ANON_KEY,"1") : localStorage.removeItem(ANON_KEY); }catch(e){} }
 
-/* 统一请求封装：自动带登录令牌 */
+/* 统一请求封装：自动带登录令牌；匿名模式下把本地记录一并带上 */
 async function api(url, opts){
   opts = opts || {};
   const h = Object.assign({"Content-Type":"application/json"}, opts.headers||{});
   const t = getToken();
   if(t) h["X-ZSD-Token"] = t;
+  if(isAnon()){
+    try{ h["X-ZSD-Anon"] = JSON.stringify(anonStore.read()); }catch(e){}
+  }
   return fetch(url, Object.assign({}, opts, {headers:h}));
 }
 
+/* ============ 匿名本地存储 ============ */
+/* 匿名用户的数据只保存在这台设备上：作答、错题、任务勾选 */
+const ANON_STORE_KEY = "zsd_anon_data";
+const anonStore = {
+  read(){
+    try{
+      const raw = localStorage.getItem(ANON_STORE_KEY);
+      const d = raw ? JSON.parse(raw) : null;
+      return {answers:(d&&d.answers)||[], tasks:(d&&d.tasks)||[]};
+    }catch(e){ return {answers:[], tasks:[]}; }
+  },
+  write(d){
+    try{ localStorage.setItem(ANON_STORE_KEY, JSON.stringify(d)); }catch(e){}
+  },
+  addAnswer(cid, qid, idx, chosen, correct, mode){
+    const d = this.read();
+    d.answers.push({cid, qid, idx, chosen, correct:!!correct, mode:mode||"basic",
+      at:new Date().toISOString()});
+    this.write(d);
+  },
+  setTask(day, idx, done){
+    const d = this.read();
+    d.tasks = d.tasks.filter(t=>!(String(t.day)===String(day) && String(t.idx)===String(idx)));
+    d.tasks.push({day, idx, done:!!done});
+    this.write(d);
+  },
+  clearCourse(cid){
+    const d = this.read();
+    d.answers = d.answers.filter(a=>String(a.cid)!==String(cid));
+    this.write(d);
+  },
+  clear(){ try{ localStorage.removeItem(ANON_STORE_KEY); }catch(e){} }
+};
+
+/* ---- 登录页：登录/注册 切换 ---- */
+function switchLoginTab(which){
+  const isLogin = which === "login";
+  $("tabLogin").classList.toggle("on", isLogin);
+  $("tabReg").classList.toggle("on", !isLogin);
+  $("formLogin").style.display = isLogin ? "block" : "none";
+  $("formReg").style.display   = isLogin ? "none"  : "block";
+  $("loginSub").textContent = isLogin
+    ? "登录后开始学习，进度自动保存"
+    : "填 4 项信息即可开始，进度自动保存";
+  setMsg("");
+}
+
+function toggleCodeLogin(){
+  const box = $("codeLoginBox");
+  box.style.display = box.style.display === "none" ? "block" : "none";
+  if(box.style.display === "block") $("loginCode").focus();
+}
+
+function setMsg(text, isErr){
+  const m = $("loginMsg");
+  m.textContent = text || "";
+  m.classList.toggle("err", !!isErr);
+}
+
+/* 登录/注册共用的收尾 */
+function afterAuth(d){
+  setToken(d.token);
+  setAnon(!!(d.student && d.student.anonymous));
+  ME = d.student;
+  enterApp();
+}
+
+/* ---- 账号密码登录 ---- */
+async function doLoginPwd(){
+  const username = ($("loginUser").value||"").trim();
+  const password = ($("loginPwd").value||"");
+  if(!username){ setMsg("请输入用户名", true); return; }
+  if(!password){ setMsg("请输入密码", true); return; }
+  const btns = document.querySelectorAll("#formLogin .login-btn");
+  btns.forEach(b=>b.disabled=true); setMsg("正在登录…");
+  try{
+    const r = await fetch("/api/login_pwd",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({username,password})});
+    const d = await r.json();
+    if(!d.ok){ setMsg(d.msg||"登录失败", true); btns.forEach(b=>b.disabled=false); return; }
+    afterAuth(d);
+  }catch(e){
+    setMsg("网络异常，请重试", true); btns.forEach(b=>b.disabled=false);
+  }
+}
+
+/* ---- 注册 ---- */
+async function doRegister(){
+  const username = ($("regUser").value||"").trim();
+  const phone    = ($("regPhone").value||"").trim();
+  const name     = ($("regName").value||"").trim();
+  const password = ($("regPwd").value||"");
+  if(!username){ setMsg("请填写用户名", true); return; }
+  if(!/^[A-Za-z0-9_]{3,20}$/.test(username)){ setMsg("用户名需 3-20 位字母、数字或下划线", true); return; }
+  if(!/^1[3-9]\d{9}$/.test(phone)){ setMsg("请填写正确的 11 位手机号", true); return; }
+  if(!name){ setMsg("请填写姓名", true); return; }
+  if(password.length < 6){ setMsg("密码至少 6 位", true); return; }
+  const btns = document.querySelectorAll("#formReg .login-btn");
+  btns.forEach(b=>b.disabled=true); setMsg("正在注册…");
+  try{
+    const r = await fetch("/api/register",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({username,phone,name,password})});
+    const d = await r.json();
+    if(!d.ok){ setMsg(d.msg||"注册失败", true); btns.forEach(b=>b.disabled=false); return; }
+    afterAuth(d);
+  }catch(e){
+    setMsg("网络异常，请重试", true); btns.forEach(b=>b.disabled=false);
+  }
+}
+
+/* ---- 匿名体验 ---- */
+async function doAnonymous(){
+  const btns = document.querySelectorAll("#scrLogin .login-btn");
+  btns.forEach(b=>b.disabled=true); setMsg("正在进入…");
+  try{
+    const r = await fetch("/api/anonymous",{method:"POST"});
+    const d = await r.json();
+    if(!d.ok){ setMsg("进入失败，请重试", true); btns.forEach(b=>b.disabled=false); return; }
+    afterAuth(d);
+  }catch(e){
+    setMsg("网络异常，请重试", true); btns.forEach(b=>b.disabled=false);
+  }
+}
+
+/* ---- 登录码登录（老方式，保留兼容） ---- */
 async function doLogin(){
   const code = ($("loginCode").value||"").trim().toLowerCase();
-  const msg = $("loginMsg");
-  if(!code){ msg.textContent = "请输入登录码"; return; }
-  const btn = document.querySelector(".login-btn");
-  btn.disabled = true; msg.textContent = "正在进入…";
+  if(!code){ setMsg("请输入登录码", true); return; }
+  const btn = document.querySelector("#codeLoginBox .login-btn");
+  if(btn) btn.disabled = true; setMsg("正在进入…");
   try{
     const r = await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({code})});
     const d = await r.json();
-    if(!d.ok){ msg.textContent = d.msg || "登录失败"; btn.disabled = false; return; }
-    setToken(d.token);
-    ME = d.student;
-    enterApp();
+    if(!d.ok){ setMsg(d.msg || "登录失败", true); if(btn) btn.disabled=false; return; }
+    afterAuth(d);
   }catch(e){
-    msg.textContent = "网络异常，请重试"; btn.disabled = false;
+    setMsg("网络异常，请重试", true); if(btn) btn.disabled=false;
   }
 }
 
 async function doLogout(){
+  // 匿名退出：清掉本地匿名记录（避免下次进来看到别人的痕迹）
+  if(isAnon()){
+    if(!confirm("退出匿名体验？\n\n你的作答记录只存在这台手机里，退出后将被清空。")) return;
+    anonStore.clear();
+  }
   try{ await api("/api/logout",{method:"POST",body:"{}"}); }catch(e){}
   clearToken();
+  setAnon(false);
   ME = null;
   // 清掉 hash，避免刷新后停在上次页面
   try{ history.replaceState(null, "", location.pathname); }catch(e){ location.hash = ""; }
@@ -405,8 +601,12 @@ async function doLogout(){
 function enterApp(){
   $("scrLogin").classList.remove("active");
   $("mainTopbar").style.display = "block";
-  $("whoName").textContent = (ME && ME.name) || "同学";
+  const nm = (ME && ME.name) || "同学";
+  $("whoName").textContent = nm;
   $("greet").textContent = (ME && ME.name ? ME.name + "，" : "") + "今天想学哪一课？";
+  // 匿名模式给个提示条，说明数据只存在本机
+  const tip = $("anonTip");
+  if(tip) tip.style.display = isAnon() ? "block" : "none";
   // 确保课程页为当前页（清掉残留 hash）
   const cur = (location.hash||"").replace("#","");
   const valid = ["scrCourse","scrDetail","scrPlan","scrWrong","scrMe"];
@@ -417,8 +617,11 @@ function enterApp(){
 
 /* 身份弹层 */
 function openWho(){
-  $("whoTitle").textContent = "当前学生：" + ((ME && ME.name)||"同学");
-  $("whoSub").textContent = "登录码：" + ((ME && ME.sid)||"-") + "（点下方可换人使用）";
+  $("whoTitle").textContent = "当前身份：" + ((ME && ME.name)||"同学");
+  const idLine = ME && ME.anonymous
+    ? "匿名体验（数据只存在本机，换手机就看不到）"
+    : (ME && ME.username ? ("账号：" + ME.username) : ("登录码：" + ((ME && ME.sid)||"-")));
+  $("whoSub").textContent = idLine + "（点下方可换人使用）";
   $("whoMask").classList.add("on");
 }
 function closeWho(e){
@@ -450,13 +653,21 @@ async function boot(){
   }catch(e){}
   // 令牌失效 → 回登录页
   clearToken();
+  setAnon(false);
   showLogin();
 }
 
-/* 回车提交 */
+/* 回车提交（各输入框都支持直接回车） */
 window.addEventListener("DOMContentLoaded", ()=>{
-  const inp = $("loginCode");
-  if(inp) inp.addEventListener("keydown", e=>{ if(e.key==="Enter") doLogin(); });
+  const bind = (id, fn)=>{
+    const el = $(id);
+    if(el) el.addEventListener("keydown", e=>{ if(e.key==="Enter") fn(); });
+  };
+  bind("loginUser", doLoginPwd);
+  bind("loginPwd",  doLoginPwd);
+  bind("loginCode", doLogin);
+  // 注册表单：任一框回车即提交
+  ["regUser","regPhone","regName","regPwd"].forEach(id=>bind(id, doRegister));
   boot();
 });
 
@@ -662,6 +873,7 @@ async function resetQuiz(){
   if(!confirm("确定要清空本课的作答记录吗？")) return;
   await api("/api/course/reset",{method:"POST",
     body:JSON.stringify({courseId:CUR.id})});
+  if(isAnon()) anonStore.clearCourse(CUR.id);   // 本地也要清
   const r = await api("/api/course/"+CUR.id+(CUR.mode?`?mode=${CUR.mode}`:""));
   CUR = await r.json();
   renderQuiz(CUR);
@@ -676,6 +888,8 @@ async function answer(qi,choice){
   const r = await api("/api/answer",{method:"POST",
     body:JSON.stringify({courseId:CUR.id,qid:q.qid,questionIdx:qi,chosen:choice,mode:CUR.mode||"basic"})});
   const d = await r.json();
+  // 匿名模式：判分结果存本地（服务器不留痕）
+  if(isAnon()) anonStore.addAnswer(CUR.id, q.qid, qi, choice, d.correct, CUR.mode||"basic");
   const opts = box.querySelectorAll(".opt");
   opts.forEach((o,j)=>{
     o.classList.add("locked"); o.removeAttribute("onclick");
@@ -716,6 +930,7 @@ async function loadPlan(){
 }
 
 async function toggleTask(day,idx,done){
+  if(isAnon()) anonStore.setTask(day, idx, done);   // 匿名存本地
   await api("/api/plan/toggle",{method:"POST",
     body:JSON.stringify({day,taskIdx:idx,done:!!done})});
   loadPlan();
@@ -774,11 +989,13 @@ async function redoPick(cid,choice,el){
   const area = el.parentElement;
   const item = el.closest(".wq");
   area.querySelectorAll(".opt").forEach(o=>{o.classList.add("locked");o.removeAttribute("onclick");});
+  const qi = item.dataset.redoIdx===""?null:Number(item.dataset.redoIdx);
   const r = await api("/api/redo",{method:"POST",
     body:JSON.stringify({courseId:cid,qid:item.dataset.redoQid||null,
-      questionIdx:item.dataset.redoIdx===""?null:Number(item.dataset.redoIdx),
-      chosen:choice})});
+      questionIdx:qi, chosen:choice})});
   const d = await r.json();
+  // 匿名模式：重做也记到本地（答对即覆盖旧错题）
+  if(isAnon()) anonStore.addAnswer(cid, item.dataset.redoQid||null, qi, choice, d.correct, "redo");
   const opts = area.querySelectorAll(".opt");
   opts.forEach((o,j)=>{
     if(j===d.answer) o.classList.add("right");

@@ -240,26 +240,39 @@ async function loadStudents(){
   const d = await r.json();
   const list = d.students || [];
   // 顶部切换标签
-  $("stuTabs").innerHTML = list.map(s=>`
-    <button class="stu-tab ${s.sid===CUR_SID?'on':''} ${s.active?'':'off'}"
+  $("stuTabs").innerHTML = list.map(s=>{
+    const badge = s.anonymous ? `<span class="tag">匿名</span>` : (s.kind ? `<span class="tag">${esc(s.kind)}</span>` : ``);
+    return `<button class="stu-tab ${s.sid===CUR_SID?'on':''} ${s.active?'':'off'}"
       onclick="pickStudent('${s.sid}')">
       <span class="dot" style="background:${s.color||'#2f6fed'}"></span>
-      ${esc(s.name)}${s.active?'':'（停用）'}
-    </button>`).join("") || `<p class="note" style="margin:0">还没有学生，请在下方「学生管理」里创建。</p>`;
+      ${esc(s.name)}${s.active?'':'（停用）'}${badge}
+    </button>`;
+  }).join("") || `<p class="note" style="margin:0">还没有学生，请在下方「学生管理」里创建。</p>`;
 
   // 管理列表
-  $("stuList").innerHTML = list.map(s=>`
-    <div class="stu-row">
+  $("stuList").innerHTML = list.map(s=>{
+    let meta;
+    if(s.anonymous){
+      meta = "匿名公共入口";
+    }else if(s.username){
+      // 注册用户：显示用户名 + 手机号
+      meta = `${esc(s.username)} · ${s.phone ? esc(s.phone) : "未填手机号"}`;
+    }else{
+      // 登录码账号：显示登录码本身
+      meta = `登录码 ${esc(s.sid)}`;
+    }
+    return `<div class="stu-row">
       <span class="dot" style="background:${s.color||'#2f6fed'};width:8px;height:8px;border-radius:50%"></span>
       <span class="sname">${esc(s.name)}</span>
-      <span class="scode">${esc(s.sid)}</span>
+      <span class="scode">${esc(s.kind||'登录码')} · ${meta}</span>
       <span class="sstat">已答 ${s.answered||0} 题${s.lastActive?(' · 最近 '+fmtTime(s.lastActive)):' · 未使用'}</span>
       <div class="act">
-        <button class="btn-sm" onclick="renameStudent('${s.sid}','${esc(s.name)}')">改名</button>
-        <button class="btn-sm" onclick="toggleStudent('${s.sid}',${s.active?1:0})">${s.active?'停用':'启用'}</button>
-        <button class="btn-sm" onclick="delStudent('${s.sid}','${esc(s.name)}')">删除</button>
+        ${s.anonymous?`<span class="tag">不可删</span>`:`<button class="btn-sm" onclick="renameStudent('${s.sid}','${esc(s.name)}')">改名</button>`}
+        ${s.anonymous?``:`<button class="btn-sm" onclick="toggleStudent('${s.sid}',${s.active?1:0})">${s.active?'停用':'启用'}</button>`}
+        ${s.anonymous?``:`<button class="btn-sm" onclick="delStudent('${s.sid}','${esc(s.name)}')">删除</button>`}
       </div>
-    </div>`).join("");
+    </div>`;
+  }).join("");
 }
 
 function fmtTime(t){

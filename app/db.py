@@ -154,14 +154,18 @@ def _ensure_dir():
 # 建表（两种后端通用）
 # =========================================================
 SCHEMA = [
-    # ---- 学生账号（多用户核心：登录码即身份）----
+    # ---- 学生账号（多用户核心：sid 即身份，注册用户另有 username/phone/password_hash）----
     """CREATE TABLE IF NOT EXISTS students (
-        sid         TEXT PRIMARY KEY,
-        name        TEXT NOT NULL,
-        color       TEXT DEFAULT '#2f6fed',
-        active      INTEGER DEFAULT 1,
-        created_at  TEXT NOT NULL,
-        last_active TEXT
+        sid           TEXT PRIMARY KEY,
+        name          TEXT NOT NULL,
+        color         TEXT DEFAULT '#2f6fed',
+        active        INTEGER DEFAULT 1,
+        created_at    TEXT NOT NULL,
+        last_active   TEXT,
+        username      TEXT,
+        phone         TEXT,
+        password_hash TEXT,
+        is_anonymous  INTEGER DEFAULT 0
     )""",
     # ---- 登录态（记住登录用；token → sid）----
     """CREATE TABLE IF NOT EXISTS tokens (
@@ -260,6 +264,18 @@ def _migrate():
         if "mode" not in cols:
             execute("ALTER TABLE answers ADD COLUMN mode TEXT DEFAULT 'basic'")
 
+    # students 表新增注册字段（老库只有登录码，升级后兼容）
+    cols = _columns_of("students")
+    if cols:
+        if "username" not in cols:
+            execute("ALTER TABLE students ADD COLUMN username TEXT")
+        if "phone" not in cols:
+            execute("ALTER TABLE students ADD COLUMN phone TEXT")
+        if "password_hash" not in cols:
+            execute("ALTER TABLE students ADD COLUMN password_hash TEXT")
+        if "is_anonymous" not in cols:
+            execute("ALTER TABLE students ADD COLUMN is_anonymous INTEGER DEFAULT 0")
+
 
 def init_db():
     """初始化表结构与默认配置"""
@@ -273,12 +289,16 @@ def init_db():
     # 题库索引
     execute("CREATE INDEX IF NOT EXISTS idx_q_course ON questions(course_id, tier, active)")
     execute("CREATE INDEX IF NOT EXISTS idx_answers_qid ON answers(student_id, qid)")
+    # 注册用户唯一性（NULL 不参与唯一约束，所以老数据/匿名账号不受影响）
+    execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_stu_username "
+            "ON students(username) WHERE username IS NOT NULL")
 
     execute("INSERT OR IGNORE INTO config(key,value) VALUES(?,?)", ("admin_password", "888888"))
     execute("INSERT OR IGNORE INTO config(key,value) VALUES(?,?)", ("student_name", "同学"))
     execute("INSERT OR IGNORE INTO config(key,value) VALUES(?,?)", ("daily_target_minutes", "25"))
 
     _ensure_default_student()
+    ensure_anonymous_student()
 
 
 def _ensure_default_student():
@@ -331,7 +351,7 @@ def get_student(sid):
     return rows[0] if rows else None
 
 
-def create_student(sid, name, color="#2f6fed"):
+def create_student(sid, name, color="#2f6fed", is_anonymous=False):
     """新建学生。sid 即登录码（拼音）。返回是否成功（重名则失败）。"""
     sid = (sid or "").strip()
     name = (name or "").strip() or sid
@@ -340,10 +360,113 @@ def create_student(sid, name, color="#2f6fed"):
     if get_student(sid):
         return False, "这个登录码已经有人用了"
     # last_active 留空：只有真正使用过才算"活跃"，保证列表排序有意义
-    execute("INSERT INTO students(sid,name,color,active,created_at,last_active) "
-            "VALUES(?,?,?,1,?,NULL)",
-            (sid, name, color, datetime.now().isoformat(timespec="seconds")))
+    execute("INSERT INTO students"
+            "(sid,name,color,active,created_at,last_active,is_anonymous) "
+            "VALUES(?,?,?,1,?,NULL,?)",
+            (sid, name, color, datetime.now().isoformat(timespec="seconds"),
+             1 if is_anonymous else 0))
     return True, "创建成功"
+
+
+def ensure_anonymous_student():
+    """
+    匿名体验用的公共账号（所有匿名用户共用一个 sid）。
+    数据按浏览器本地隔离：前端匿名时只在本地缓存作答，不上传服务器。
+    """
+    sid = "anonymous"
+    stu = get_student(sid)
+    if stu:
+        return stu
+    now = datetime.now().isoformat(timespec="seconds")
+    execute("INSERT INTO students"
+            "(sid,name,color,active,created_at,last_active,is_anonymous) "
+            "VALUES(?,?,?,1,?,NULL,1)",
+            (sid, "匿名体验", "#9aa4b2", now))
+    return get_student(sid)
+
+
+# ---------------- 注册账号（用户名 + 密码） ----------------
+import hashlib as _hashlib
+
+
+def hash_password(password):
+    """口令散列：盐 + SHA256，避免明文落库。"""
+    salt = "zsd2026"
+    return _hashlib.sha256((salt + str(password)).encode("utf-8")).hexdigest()
+
+
+def get_student_by_username(username):
+    """按用户名查学生（用户名不区分大小写）"""
+    u = (username or "").strip().lower()
+    if not u:
+        return None
+    rows = query("SELECT * FROM students WHERE lower(username)=?", (u,))
+    return rows[0] if rows else None
+
+
+def get_student_by_phone(phone):
+    p = (phone or "").strip()
+    if not p:
+        return None
+    rows = query("SELECT * FROM students WHERE phone=?", (p,))
+    return rows[0] if rows else None
+
+
+def register_student(username, phone, name, password):
+    """
+    开放注册。sid 直接用用户名（小写），这样注册用户天然与登录码用户共存。
+    返回 (是否成功, 消息, 学生记录)
+    """
+    import re
+    import uuid as _uuid
+
+    username = (username or "").strip()
+    phone = (phone or "").strip()
+    name = (name or "").strip()
+    password = str(password or "")
+
+    if not username:
+        return False, "请填写用户名", None
+    if not re.fullmatch(r"[A-Za-z0-9_]{3,20}", username):
+        return False, "用户名需 3-20 位字母、数字或下划线", None
+    if not re.fullmatch(r"1[3-9]\d{9}", phone):
+        return False, "请填写正确的 11 位手机号", None
+    if not name:
+        return False, "请填写姓名", None
+    if len(password) < 6:
+        return False, "密码至少 6 位", None
+
+    key = username.lower()
+    if get_student_by_username(key):
+        return False, "这个用户名已经被注册了", None
+    if get_student_by_phone(phone):
+        return False, "这个手机号已经被注册了", None
+
+    sid = key
+    if get_student(sid):
+        # 极端情况：与老登录码撞名，加后缀避免覆盖
+        sid = key + "_" + _uuid.uuid4().hex[:4]
+
+    now = datetime.now().isoformat(timespec="seconds")
+    execute("INSERT INTO students"
+            "(sid,name,color,active,created_at,last_active,username,phone,password_hash,is_anonymous) "
+            "VALUES(?,?,?,1,?,NULL,?,?,?,0)",
+            (sid, name, "#2f6fed", now, key, phone, hash_password(password)))
+    return True, "注册成功", get_student(sid)
+
+
+def verify_login(username, password):
+    """用户名 + 密码校验。返回 (是否成功, 消息, 学生记录)"""
+    stu = get_student_by_username(username)
+    if not stu:
+        return False, "用户名不存在，请先注册", None
+    if not stu.get("password_hash"):
+        return False, "该账号不支持密码登录，请使用登录码", None
+    if stu.get("active") in (0, "0"):
+        return False, "该账号已被停用", None
+    if stu["password_hash"] != hash_password(password):
+        return False, "密码不正确", None
+    return True, "登录成功", stu
 
 
 def update_student(sid, name=None, color=None, active=None):
@@ -624,3 +747,158 @@ def get_tasks(student_id="default"):
     for r in rows:
         result.setdefault(str(r["day_no"]), {})[str(r["task_idx"])] = bool(r["done"])
     return result
+
+
+# =========================================================
+# 匿名体验（数据只存浏览器本地，后端不做持久化）
+# ---------------------------------------------------------
+# 设计：匿名模式下前端把作答记录放在 localStorage，
+# 并在每次请求时通过 X-ZSD-Anon 头把这份记录带给后端，
+# 后端在"内存里临时算一遍"统计结果返回，不落库、不与人共享。
+# 这样既能让匿名用户看到进度/错题，又保证数据彼此隔离。
+# =========================================================
+def _anon_rows(payload):
+    """把前端传来的匿名记录规整成统一行格式"""
+    rows = []
+    for a in (payload or {}).get("answers", []) or []:
+        try:
+            rows.append({
+                "course_id": str(a.get("cid") or ""),
+                "qid": a.get("qid"),
+                "question_idx": a.get("idx"),
+                "chosen": int(a.get("chosen", -1)),
+                "correct": 1 if a.get("correct") else 0,
+                "answered_at": a.get("at") or "",
+                "mode": a.get("mode") or "basic",
+            })
+        except (TypeError, ValueError):
+            continue
+    return rows
+
+
+def _anon_latest(rows):
+    """同一题只保留最后一次作答（qid 优先，否则按 idx）"""
+    latest = {}
+    for r in rows:
+        key = ("q", r["qid"]) if r.get("qid") else ("i", r["course_id"], r.get("question_idx"))
+        old = latest.get(key)
+        if old is None or (r.get("answered_at") or "") >= (old.get("answered_at") or ""):
+            latest[key] = r
+    return list(latest.values())
+
+
+def anon_stats(payload):
+    rows = _anon_latest(_anon_rows(payload))
+    by_course, total, right = {}, 0, 0
+    for r in rows:
+        cid = r["course_id"]
+        by_course.setdefault(cid, {"total": 0, "right": 0})
+        by_course[cid]["total"] += 1
+        total += 1
+        if r["correct"]:
+            by_course[cid]["right"] += 1
+            right += 1
+    return {"total": total, "right": right,
+            "rate": round(right / total * 100) if total else 0,
+            "by_course": by_course, "wrong_count": total - right}
+
+
+def anon_course_answers(course_id, payload):
+    rows = _anon_latest(_anon_rows(payload))
+    by_qid, by_idx = {}, {}
+    for r in rows:
+        if r["course_id"] != course_id:
+            continue
+        info = {"chosen": r["chosen"], "correct": bool(r["correct"])}
+        if r.get("qid"):
+            by_qid[r["qid"]] = info
+        if r.get("question_idx") is not None:
+            by_idx[str(r["question_idx"])] = info
+    return {"byQid": by_qid, "byIdx": by_idx}
+
+
+def anon_wrong_questions(payload):
+    """错题列表：带上题干/选项/解析，方便前端直接渲染"""
+    rows = [r for r in _anon_latest(_anon_rows(payload)) if not r["correct"]]
+    rows.sort(key=lambda r: r.get("answered_at") or "", reverse=True)
+    out = []
+    for r in rows:
+        q = _get_question_row(r["qid"]) if r.get("qid") else None
+        if not q:
+            continue
+        out.append({
+            "qid": q["qid"], "course_id": q["course_id"],
+            "courseTitle": _course_title(q["course_id"]),
+            "stem": q["stem"], "options": q["options"],
+            "answer": q["answer"], "explain": q.get("explain", ""),
+            "chosen": r["chosen"], "answered_at": r["answered_at"],
+        })
+    return out
+
+
+def _course_title(cid):
+    rows = query("SELECT title FROM courses WHERE cid=?", (cid,))
+    return rows[0]["title"] if rows else cid
+
+
+def _get_question_row(qid):
+    """按 qid 取题目原文（db 层自用，避免依赖 bank.py）"""
+    rows = query("SELECT * FROM questions WHERE qid=? AND active=1", (qid,))
+    if not rows:
+        return None
+    r = rows[0]
+    try:
+        options = json.loads(r.get("options") or "[]")
+    except (ValueError, TypeError):
+        options = []
+    return {"qid": r["qid"], "course_id": r["course_id"], "stem": r["stem"],
+            "options": options, "answer": r["answer"], "explain": r.get("explain", "")}
+
+
+def anon_study_time(payload, days=7):
+    """按日期聚合匿名记录的条数（近似学习时长：每题折算 40 秒）"""
+    rows = _anon_rows(payload)
+    per_day = {}
+    for r in rows:
+        d = (r.get("answered_at") or "")[:10]
+        if d:
+            per_day[d] = per_day.get(d, 0) + 1
+    since = (date.today() - timedelta(days=days - 1)).isoformat()
+    out = []
+    cur = date.today() - timedelta(days=days - 1)
+    while cur <= date.today():
+        ds = cur.isoformat()
+        n = per_day.get(ds, 0)
+        secs = n * 40 if ds >= since else 0
+        disp = f"{secs}秒" if secs < 60 else f"{round(secs/60,1)}分"
+        out.append({"date": ds, "minutes": round(secs / 60), "seconds": secs,
+                    "rounds": n, "display": disp})
+        cur += timedelta(days=1)
+    return out
+
+
+def anon_streak(payload):
+    """连续答题天数"""
+    days = sorted({(r.get("answered_at") or "")[:10] for r in _anon_rows(payload)} - {""})
+    if not days:
+        return 0
+    streak, cur = 0, date.today()
+    s = set(days)
+    while cur.isoformat() in s:
+        streak += 1
+        cur -= timedelta(days=1)
+    return streak
+
+
+def anon_tasks(payload):
+    result = {}
+    for t in (payload or {}).get("tasks", []) or []:
+        result.setdefault(str(t.get("day")), {})[str(t.get("idx"))] = bool(t.get("done"))
+    return result
+
+
+def anon_reset_course(course_id, payload):
+    """返回"清除该课记录后"的新记录（前端覆盖本地缓存即可）"""
+    keep = [a for a in (payload or {}).get("answers", []) or []
+            if str(a.get("cid")) != str(course_id)]
+    return {"answers": keep}
