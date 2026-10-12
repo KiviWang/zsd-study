@@ -119,9 +119,25 @@
     background:none;border:0;cursor:pointer;font-weight:600;width:100%;text-align:left}
   .lg-more:active{opacity:.6}
   .lg-more .caret{font-size:9px;margin-right:3px}
+  /* ---- 首屏骨架：服务器慢时不白屏 ---- */
+  .boot-wrap{min-height:70vh;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:14px}
+  .boot-spin{width:26px;height:26px;border-radius:50%;
+    border:2.5px solid var(--line);border-top-color:var(--brand);
+    animation:bspin .8s linear infinite}
+  @keyframes bspin{to{transform:rotate(360deg)}}
+  .boot-txt{font-size:13px;color:var(--text3);margin:0}
 </style>
 </head>
 <body>
+
+<!-- ============ 骨架（首屏占位） ============ -->
+<!-- 服务器响应可能较慢（免费版偶发 5~11 秒），先渲染点东西，避免长时间白屏
+     被 iOS Safari / 微信判定为「页面无响应」 -->
+<div id="boot" class="boot-wrap">
+  <div class="boot-spin"></div>
+  <p class="boot-txt">正在加载…</p>
+</div>
 
 <!-- ============ 登录 ============ -->
 <!-- 默认隐藏：先向后端确认登录态，已登录则直接进看板，避免闪一下登录页 -->
@@ -131,7 +147,7 @@
     <h1>家长端</h1>
     <p>请输入管理密码查看学习情况</p>
     <input type="password" id="pwd" placeholder="密码" onkeydown="if(event.key==='Enter')doLogin()">
-    <button onclick="doLogin()">进入看板</button>
+    <button id="btnLogin" onclick="doLogin()">进入看板</button>
     <div class="login-err" id="err"></div>
     <p class="login-tip">默认为适应期密码 888888<br>如需修改，可在看板底部「设置」中更改<br>
       <span style="color:var(--ok)">登录后 30 天内免密自动进入</span></p>
@@ -226,11 +242,35 @@
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
+/* 带超时的请求封装。
+   PythonAnywhere 免费版响应偶发 5~11 秒，iOS Safari / 微信对挂起请求容忍度低，
+   会直接提示「页面无响应」。12 秒强制中断，交由调用方给出重试提示。 */
+const API_TIMEOUT_MS = 12000;
+async function jfetch(url, opts){
+  opts = opts || {};
+  const ctrl = new AbortController();
+  const timer = setTimeout(()=>{ try{ ctrl.abort(); }catch(e){} }, API_TIMEOUT_MS);
+  try{
+    return await fetch(url, Object.assign({}, opts, {signal: ctrl.signal}));
+  }finally{
+    clearTimeout(timer);
+  }
+}
+
 /* ---------- 登录 ---------- */
 async function doLogin(){
   const pwd = $("pwd").value.trim();
-  const r = await fetch("/api/admin/login",{method:"POST",
-    headers:{"Content-Type":"application/json"},body:JSON.stringify({password:pwd})});
+  const btn = $("btnLogin");
+  if(btn) btn.disabled = true;
+  let r;
+  try{
+    r = await jfetch("/api/admin/login",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify({password:pwd})});
+  }catch(e){
+    $("err").textContent = "网络较慢或超时，请再点一次「进入看板」";
+    if(btn) btn.disabled = false;      // 关键：失败/超时必须恢复，否则按钮永久禁用
+    return;
+  }
   const d = await r.json();
   if(d.ok){
     $("login").style.display="none";
@@ -240,9 +280,10 @@ async function doLogin(){
     $("err").textContent = d.msg || "密码错误，请重试";
     $("pwd").value="";
   }
+  if(btn) btn.disabled = false;        // 无论成败都恢复，便于再次尝试
 }
 async function logout(){
-  try{ await fetch("/api/admin/logout",{method:"POST"}); }catch(e){}
+  try{ await jfetch("/api/admin/logout",{method:"POST"}); }catch(e){}
   // 直接切回登录页，避免 reload 时再次命中自动登录判断造成闪烁
   $("board").style.display="none";
   $("login").style.display="block";
@@ -299,7 +340,7 @@ function refresh(){ loadBoard(); }
 
 /* ---------- 学生切换 ---------- */
 async function loadStudents(){
-  const r = await fetch("/api/admin/students");
+  const r = await jfetch("/api/admin/students");
   if(r.status===401) return;
   const d = await r.json();
   const list = d.students || [];
@@ -365,7 +406,7 @@ async function addStudent(){
   const name = ($("newName").value||"").trim();
   const msg = $("stuMsg");
   if(!sid){ msg.textContent = "请填写登录码"; return; }
-  const r = await fetch("/api/admin/students",{method:"POST",
+  const r = await jfetch("/api/admin/students",{method:"POST",
     headers:{"Content-Type":"application/json"},body:JSON.stringify({sid,name})});
   const d = await r.json();
   msg.textContent = d.msg || (d.ok?"创建成功":"创建失败");
@@ -375,14 +416,14 @@ async function addStudent(){
 async function renameStudent(sid, oldName){
   const nn = prompt("新的名字：", oldName);
   if(nn===null || !nn.trim()) return;
-  await fetch("/api/admin/students/"+encodeURIComponent(sid),{method:"POST",
+  await jfetch("/api/admin/students/"+encodeURIComponent(sid),{method:"POST",
     headers:{"Content-Type":"application/json"},body:JSON.stringify({name:nn.trim()})});
   $("stuMsg").textContent = "已改名";
   loadBoard();
 }
 
 async function toggleStudent(sid, active){
-  await fetch("/api/admin/students/"+encodeURIComponent(sid),{method:"POST",
+  await jfetch("/api/admin/students/"+encodeURIComponent(sid),{method:"POST",
     headers:{"Content-Type":"application/json"},body:JSON.stringify({active: !active})});
   $("stuMsg").textContent = active ? "已停用（该学生将无法登录）" : "已启用";
   loadStudents();
@@ -390,7 +431,7 @@ async function toggleStudent(sid, active){
 
 async function delStudent(sid, name){
   if(!confirm(`确定删除「${name}」吗？\n\n删除后该学生的登录码失效，学习记录也会一起删除，无法恢复。`)) return;
-  await fetch("/api/admin/students/"+encodeURIComponent(sid)+"?wipe=1",{method:"DELETE"});
+  await jfetch("/api/admin/students/"+encodeURIComponent(sid)+"?wipe=1",{method:"DELETE"});
   $("stuMsg").textContent = "已删除";
   if(CUR_SID===sid){ CUR_SID = null; saveLastSid(""); }   // 清掉记忆，避免指向已删除的学生
   loadBoard();
@@ -551,7 +592,7 @@ function render(){
   }
 
   /* 配置 */
-  fetch("/api/admin/config").then(r=>r.json()).then(c=>{
+  jfetch("/api/admin/config").then(r=>r.json()).then(c=>{
     $("cfgTarget").value = c.dailyTarget||25;
   });
 }
@@ -562,7 +603,7 @@ async function saveCfg(){
   };
   const np = $("cfgPwd").value.trim();
   if(np) body.newPassword = np;
-  const r = await fetch("/api/admin/config",{method:"POST",
+  const r = await jfetch("/api/admin/config",{method:"POST",
     headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
   if(r.ok){
     $("cfgSaved").textContent = "✓ 已保存";
@@ -575,24 +616,35 @@ async function saveCfg(){
 /* ---------- 初始化 ---------- */
 /* 打开页面时先问后端「我登录了吗」：
    - 已登录（cookie 有效，30 天内）→ 直接进看板，不用再输密码
-   - 未登录 → 显示登录页 */
-(async function(){
-  try{
-    const r = await fetch("/api/admin/check");
-    const d = await r.json();
-    if(d.loggedIn){
-      $("login").style.display="none";
-      $("board").style.display="block";
-      // 恢复上次查看的学生（关浏览器前的浏览状态）
-      CUR_SID = readLastSid() || null;
-      loadBoard();
-      return;
-    }
-  }catch(e){}
-  // 未登录 / 请求失败 → 显示登录页
-  $("login").style.display="block";
-  $("board").style.display="none";
-  const p = $("pwd"); if(p) p.focus();
+   - 未登录 → 显示登录页
+   期间显示骨架，避免服务器慢时长时间白屏（iOS 会判定「页面无响应」）。 */
+(function(){
+  const showBoot = ()=>{ const b=$("boot"); if(b) b.style.display="flex"; };
+  const hideBoot = ()=>{ const b=$("boot"); if(b) b.style.display="none"; };
+  const showLogin = ()=>{
+    hideBoot();
+    $("login").style.display="block";
+    $("board").style.display="none";
+    const p = $("pwd"); if(p) p.focus();
+  };
+  showBoot();
+  (async function(){
+    try{
+      const r = await jfetch("/api/admin/check");
+      const d = await r.json();
+      if(d.loggedIn){
+        hideBoot();
+        $("login").style.display="none";
+        $("board").style.display="block";
+        // 恢复上次查看的学生（关浏览器前的浏览状态）
+        CUR_SID = readLastSid() || null;
+        loadBoard();
+        return;
+      }
+    }catch(e){}
+    // 未登录 / 请求超时失败 → 显示登录页（可手动重试）
+    showLogin();
+  })();
 })();
 </script>
 </body>

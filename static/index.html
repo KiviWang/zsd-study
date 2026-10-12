@@ -515,7 +515,11 @@ function syncAdminEntry(){
   if(btn) btn.style.display = isFromAdmin() ? "flex" : "none";
 }
 
-/* 统一请求封装：自动带登录令牌；匿名模式下把本地记录一并带上 */
+/* 统一请求封装：自动带登录令牌；匿名模式下把本地记录一并带上。
+   必须带超时：PythonAnywhere 免费版响应偶发要 5~11 秒，iOS Safari/微信对挂起的
+   请求容忍度低，会直接提示「页面无响应」。这里 12 秒强制中断，让前端能给出重试提示，
+   而不是让整个页面卡死。 */
+const API_TIMEOUT_MS = 12000;
 async function api(url, opts){
   opts = opts || {};
   const h = Object.assign({"Content-Type":"application/json"}, opts.headers||{});
@@ -524,7 +528,19 @@ async function api(url, opts){
   if(isAnon()){
     try{ h["X-ZSD-Anon"] = JSON.stringify(anonStore.read()); }catch(e){}
   }
-  return fetch(url, Object.assign({}, opts, {headers:h}));
+  // 外部已传 signal 则尊重它；否则自建一个带超时的 AbortController
+  let ctrl = opts.signal ? null : new AbortController();
+  const init = Object.assign({}, opts, {headers:h});
+  if(ctrl) init.signal = ctrl.signal;
+  let timer = null;
+  if(ctrl){
+    timer = setTimeout(()=>{ try{ ctrl.abort(); }catch(e){} }, API_TIMEOUT_MS);
+  }
+  try{
+    return await fetch(url, init);
+  }finally{
+    if(timer) clearTimeout(timer);
+  }
 }
 
 /* ============ 匿名本地存储 ============ */
@@ -730,23 +746,35 @@ function showLogin(){
   document.body.classList.remove("has-topbar");
 }
 
-/* 启动时判断登录状态 */
-async function boot(){
+/* 启动时判断登录状态。
+   关键：先立刻把登录页显示出来（保证页面马上可交互），再异步去校验登录态。
+   否则服务器慢时（PythonAnywhere 免费版偶发 5~11 秒）页面一直白着，
+    iOS Safari / 微信会判定「页面无响应」并把页面杀掉。 */
+function boot(){
   const t = getToken();
   if(!t){ showLogin(); return; }
-  try{
-    const r = await api("/api/me");
-    const d = await r.json();
-    if(d.ok && d.loggedIn){
-      ME = d.student;
-      enterApp();
-      return;
-    }
-  }catch(e){}
-  // 令牌失效 → 回登录页
-  clearToken();
-  setAnon(false);
+  // 有 token：先显示登录页（带「正在恢复…」提示），验证通过再切主界面
   showLogin();
+  setMsg("正在恢复登录状态…");
+  (async ()=>{
+    try{
+      const r = await api("/api/me");
+      const d = await r.json();
+      if(d.ok && d.loggedIn){
+        ME = d.student;
+        setMsg("");
+        enterApp();
+        return;
+      }
+      // 令牌失效
+      clearToken();
+      setAnon(false);
+      setMsg("");
+    }catch(e){
+      // 网络超时或失败：保留 token，提示可重试，不清掉登录态
+      setMsg("网络较慢，请点「登录」重试", true);
+    }
+  })();
 }
 
 /* 回车提交（各输入框都支持直接回车） */

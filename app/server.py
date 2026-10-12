@@ -127,14 +127,26 @@ def _stu_brief(stu):
 
 
 # ================= 页面 =================
+def _page(filename, etag_seed=""):
+    """
+    返回静态页面，并带上缓存头。
+    PythonAnywhere 免费版响应偏慢（偶发 5~11 秒），静态页让浏览器缓存后
+    二次访问可秒开，也降低被 iOS Safari / 微信判定「页面无响应」的概率。
+    用 no-cache + ETag：每次都来问一下，没变就回 304，内容一改立刻生效。
+    """
+    resp = send_from_directory(app.static_folder, filename)
+    resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return resp
+
+
 @app.route("/")
 def index():
-    return send_from_directory(app.static_folder, "index.html")
+    return _page("index.html")
 
 
 @app.route("/admin")
 def admin_page():
-    return send_from_directory(app.static_folder, "admin.html")
+    return _page("admin.html")
 
 
 # ================= 登录 / 身份 =================
