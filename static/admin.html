@@ -342,7 +342,11 @@ function render(){
 
   const s = d.stats;
   const week = d.studyTime.reduce((a,b)=>a+b.minutes,0);
-  const today = new Date().toISOString().slice(0,10);
+  // 用中国时区取「今天」，否则 UTC 服务器在北京时间早 8 点前会取到前一天，导致今日数据串位
+  const today = (()=>{
+    const t = new Date(Date.now() + 8*3600*1000);
+    return t.toISOString().slice(0,10);
+  })();
   const todayRow = d.studyTime.find(x=>x.date===today) || {};
   const todayDisp = todayRow.display || "0分";
   const target = d.dailyTarget || 25;
@@ -355,6 +359,13 @@ function render(){
 
   /* 时长柱状图 */
   const days = d.studyTime;
+  // 把分钟数渲染成好读的样式：<1 分显示秒级提示，>=60 分显示「X.Xh」
+  const fmtMin = (m)=>{
+    m = Number(m)||0;
+    if(m <= 0) return "0";
+    if(m < 60) return m.toFixed(1).replace(/\.0$/,"") + "分";
+    return (m/60).toFixed(1).replace(/\.0$/,"") + "时";
+  };
   if(!days.length){
     $("chartBox").innerHTML = `<div class="empty">暂无学习记录<br><span style="font-size:12px">学生在学生端开始学习后，这里会显示数据</span></div>`;
   }else{
@@ -363,7 +374,7 @@ function render(){
       const h = Math.max(3, Math.round(x.minutes/max*100));
       const mm = String(x.date).slice(5);
       return `<div class="bar-col">
-        <div class="bar-v">${x.minutes||x.display}</div>
+        <div class="bar-v">${fmtMin(x.minutes)}</div>
         <div class="bar-r ${x.minutes===0?"zero":""}" style="height:${h}%"></div>
         <div class="bar-d">${mm}</div>
       </div>`;

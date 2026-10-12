@@ -830,14 +830,17 @@ def end_session(sid, student_id="default"):
             (now_cn().isoformat(timespec="seconds"), dur, sid))
 
 
-def _settle_open_sessions(student_id=None, exclude_sid=None):
+def _settle_open_sessions(student_id=None, exclude_sid=None, cap=None):
     """
-    保底结算：把「没有正常结束」的会话补上时长。
+    保底结算：把「没有正常结束」的会话补上时长并标记结束。
 
-    规则：按 started_at 到「最后一次心跳可推断的时间」估算，封顶 2 小时。
-    没有心跳字段时退化为 started_at→now（但受封顶保护），这样历史上那些
-    duration=0 的遗留会话也能拿到合理数值。
+    参数:
+      cap: 封顶秒数。默认 SESSION_MAX_SECONDS（2 小时）。
+           服务启动时传入 SESSION_HEARTBEAT_GRACE（3 分钟），
+           因为重启意味着进程已退出超过心跳周期，残留会话不可能还在活跃学习，
+           只应补偿一个心跳宽限期，避免把僵尸会话算成 2 小时。
     """
+    _cap = cap if cap is not None else SESSION_MAX_SECONDS
     sql = "SELECT id, student_id, started_at FROM sessions WHERE ended_at IS NULL"
     args = []
     if student_id:
@@ -856,7 +859,10 @@ def _settle_open_sessions(student_id=None, exclude_sid=None):
         if not start:
             continue
         dur = int((now_cn() - start).total_seconds())
-        dur = max(0, min(dur, SESSION_MAX_SECONDS))
+        dur = max(0, min(dur, _cap))
+        # 服务启动结算时，如果跨度短于最小计时阈值，直接记 0 并结束，避免误点残留变成正数
+        if dur < SESSION_MIN_SECONDS:
+            dur = 0
         execute("UPDATE sessions SET ended_at=?, duration=? WHERE id=?",
                 (now_cn().isoformat(timespec="seconds"), dur, r["id"]))
         n += 1
@@ -866,9 +872,15 @@ def _settle_open_sessions(student_id=None, exclude_sid=None):
 def settle_stale_sessions():
     """
     服务启动时调用：把上次进程退出时残留的未结束会话结算掉。
-    这些会话不可能还在进行，直接按 started_at→now 封顶结算。
+
+    重要：不能直接按 SESSION_MAX_SECONDS（2 小时）封顶，因为旧会话可能是
+    很久以前甚至多日前打开的，或者只是误点秒退。若全按 2 小时算，会导致
+    服务每次 Reload 都把僵尸会话虚增为 2 小时，累加出几百上千分钟。
+
+    这里只用「心跳宽限期」封顶：进程重启时，残留会话最多再补 3 分钟，
+    且低于 5 秒噪声阈值的记为 0。
     """
-    return _settle_open_sessions()
+    return _settle_open_sessions(cap=SESSION_HEARTBEAT_GRACE)
 
 
 def get_study_time(student_id="default", days=7):
