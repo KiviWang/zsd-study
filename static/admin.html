@@ -99,6 +99,21 @@
   .stu-row .sstat{font-size:11.5px;color:var(--text3);margin-left:auto}
   .stu-row .act{display:flex;gap:6px;width:100%;margin-top:6px}
   .stu-row .act button{flex:1}
+  /* ---- 学习记录明细 ---- */
+  .lg-day{margin-bottom:14px}
+  .lg-day:last-child{margin-bottom:0}
+  .lg-dayhead{display:flex;align-items:center;gap:8px;padding:0 0 7px;
+    border-bottom:1px solid var(--line);margin-bottom:6px}
+  .lg-dayhead b{font-size:13.5px}
+  .lg-wd{font-size:11px;color:var(--text3)}
+  .lg-total{margin-left:auto;font-size:11.5px;color:var(--text2);
+    background:#f2f3f5;padding:2px 9px;border-radius:8px}
+  .lg-row{display:flex;align-items:center;gap:10px;padding:6px 2px;font-size:13px}
+  .lg-time{font-variant-numeric:tabular-nums;color:var(--text)}
+  .lg-time i{color:var(--text3);font-style:normal;margin:0 2px}
+  .lg-dur{margin-left:auto;font-size:11.5px;font-weight:600;color:var(--brand);
+    background:var(--brand-soft);padding:2px 9px;border-radius:8px;white-space:nowrap}
+  .lg-dur.on{color:var(--ok);background:var(--ok-soft)}
 </style>
 </head>
 <body>
@@ -143,7 +158,12 @@
   <div class="panel">
     <h2>近 7 天学习时长 <span class="tag">分钟</span></h2>
     <div id="chartBox"></div>
-    <p class="note">说明：时长为「打开学习页面的停留时间」估算，单次上限 2 小时，用于判断学习投入度，非精确计时。</p>
+    <p class="note">说明：时长为「打开学习页面的停留时间」估算，用于判断学习投入度，非精确计时。</p>
+  </div>
+
+  <div class="panel">
+    <h2>学习记录 <span class="tag">最近 7 天</span></h2>
+    <div id="sessionLogBox"></div>
   </div>
 
   <div class="panel">
@@ -379,6 +399,50 @@ function render(){
         <div class="bar-d">${mm}</div>
       </div>`;
     }).join("") + `</div>`;
+  }
+
+  /* 学习记录明细：按天分组，列出每次学习的起止时间 */
+  const logs = d.sessionLog || [];
+  if(!logs.length){
+    $("sessionLogBox").innerHTML = `<div class="empty">暂无学习记录<br><span style="font-size:12px">学生在学生端开始学习后，这里会显示每次的起止时间</span></div>`;
+  }else{
+    // 按日期分组（后端已按 started_at 倒序返回）
+    const byDay = {};
+    logs.forEach(x=>{ (byDay[x.date] = byDay[x.date] || []).push(x); });
+    const dayKeys = Object.keys(byDay).sort().reverse();
+    const today_s = (()=>{          // 中国时区的今天
+      const t = new Date(Date.now() + 8*3600*1000);
+      return t.toISOString().slice(0,10);
+    })();
+    const yest_s = (()=>{
+      const t = new Date(Date.now() + 8*3600*1000 - 86400000);
+      return t.toISOString().slice(0,10);
+    })();
+    const dayLabel = (day)=>{
+      if(day === today_s) return "今天";
+      if(day === yest_s) return "昨天";
+      return day.slice(5).replace("-","月") + "日";
+    };
+    const weekMap = ["周日","周一","周二","周三","周四","周五","周六"];
+
+    $("sessionLogBox").innerHTML = dayKeys.map(day=>{
+      const items = byDay[day];
+      const total = items.reduce((a,b)=>a+b.seconds,0);
+      const totalDisp = total<60 ? total+"秒" : (total<3600 ? fmtMin(total/60) : fmtMin(total/60));
+      const wd = weekMap[new Date(day + "T00:00:00Z").getUTCDay()];
+      return `<div class="lg-day">
+        <div class="lg-dayhead">
+          <b>${dayLabel(day)}</b>
+          <span class="lg-wd">${wd}</span>
+          <span class="lg-total">${items.length} 段 · 合计 ${totalDisp}</span>
+        </div>
+        ${items.map(x=>`
+          <div class="lg-row">
+            <span class="lg-time">${x.start} <i>→</i> ${x.end}</span>
+            <span class="lg-dur${x.ongoing?" on":""}">${x.ongoing?"进行中":x.duration}</span>
+          </div>`).join("")}
+      </div>`;
+    }).join("");
   }
 
   /* 各课掌握 */

@@ -11,6 +11,7 @@ from flask import Flask, jsonify, request, send_from_directory, session
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from db import (init_db, get_config, set_config, record_answer, get_wrong_questions,
                 get_stats, start_session, end_session, get_study_time, get_streak,
+                get_session_log,
                 heartbeat_session, settle_stale_sessions,
                 record_video, get_video_stats, set_task, get_tasks, get_course_answers,
                 reset_course_answers, USE_TURSO as _USE_TURSO,
@@ -558,6 +559,7 @@ def api_admin_dashboard():
         "stats": stats,
         "byCourse": by_course,
         "studyTime": get_study_time(target, 7),
+        "sessionLog": get_session_log(target, 7),
         "streak": get_streak(target),
         "videos": get_video_stats(target),
         "tasks": {"done": done_tasks, "total": total_tasks, "detail": tasks},

@@ -908,6 +908,67 @@ def get_study_time(student_id="default", days=7):
 
 
 
+def get_session_log(student_id="default", days=7, min_seconds=5):
+    """
+    学习记录明细：返回最近 N 天每次学习会话的起止时间与时长。
+
+    每条记录形如：
+        {"date": "2026-10-12", "start": "09:15", "end": "09:42",
+         "seconds": 1620, "duration": "27分", "ongoing": False}
+
+    - start/end 为北京时间 HH:MM（跨天会话的 end 会带次日标记）
+    - 过滤掉时长低于 min_seconds 的误点噪声
+    - 未结束的会话 ongoing=True，end 用当前时间兜底显示
+    """
+    since = (now_cn().date() - timedelta(days=days - 1)).isoformat()
+    rows = query("""
+        SELECT id, started_at, ended_at, duration
+        FROM sessions
+        WHERE student_id=? AND SUBSTR(started_at,1,10) >= ?
+        ORDER BY started_at DESC
+    """, (student_id, since))
+
+    now = now_cn()
+    out = []
+    for r in rows:
+        secs = int(r.get("duration") or 0)
+        if secs < min_seconds:
+            continue
+        st = _parse_dt(r["started_at"])
+        if not st:
+            continue
+        et = _parse_dt(r["ended_at"])
+        ongoing = et is None
+        if ongoing:
+            et = now
+
+        # 时长展示
+        if secs < 60:
+            disp = f"{secs}秒"
+        elif secs < 3600:
+            disp = f"{round(secs/60,1):g}分"
+        else:
+            h = secs // 3600
+            m = round((secs % 3600) / 60)
+            disp = f"{h}时{m}分" if m else f"{h}时"
+
+        # 结束时间若落在次日，加 "+1" 标记
+        day = st.strftime("%Y-%m-%d")
+        end_label = et.strftime("%H:%M")
+        if et.strftime("%Y-%m-%d") != day:
+            end_label += "(+%d天)" % ((et.date() - st.date()).days)
+
+        out.append({
+            "date": day,
+            "start": st.strftime("%H:%M"),
+            "end": end_label,
+            "seconds": secs,
+            "duration": disp,
+            "ongoing": ongoing,
+        })
+    return out
+
+
 def get_streak(student_id="default"):
     rows = query("""
         SELECT DISTINCT SUBSTR(started_at,1,10) AS d FROM sessions
