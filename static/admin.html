@@ -114,6 +114,11 @@
   .lg-dur{margin-left:auto;font-size:11.5px;font-weight:600;color:var(--brand);
     background:var(--brand-soft);padding:2px 9px;border-radius:8px;white-space:nowrap}
   .lg-dur.on{color:var(--ok);background:var(--ok-soft)}
+  /* 超过 5 条时折叠：只显示前 5 条 + 「显示全部」*/
+  .lg-more{margin:4px 0 0;padding:4px 0;font-size:11.5px;color:var(--brand);
+    background:none;border:0;cursor:pointer;font-weight:600;width:100%;text-align:left}
+  .lg-more:active{opacity:.6}
+  .lg-more .caret{font-size:9px;margin-right:3px}
 </style>
 </head>
 <body>
@@ -256,13 +261,37 @@ function viewAsStudent(){
 /* ---------- 看板 ---------- */
 let DATA = null;
 let CUR_SID = null;   // 当前查看的学生
+/* 学习记录里「已展开」的日期集合。
+   render() 会整体重绘 innerHTML，若只靠 DOM 记状态，点一次「刷新」就收回了。
+   放在内存里，同一次访问内保持展开状态。 */
+const LG_EXPANDED = new Set();
+function toggleLogDay(day){
+  if(LG_EXPANDED.has(day)) LG_EXPANDED.delete(day);
+  else LG_EXPANDED.add(day);
+  if(DATA) render();     // 用已有数据重绘，不重新请求
+}
+
+/* 记住上次查看的学生：关浏览器再打开，仍停在上次那个学生的看板上。
+   存 localStorage（不是 sessionStorage），这样换标签/关浏览器都保留。 */
+const LAST_SID_KEY = "zsd_admin_last_sid";
+function saveLastSid(sid){
+  try{
+    if(sid) localStorage.setItem(LAST_SID_KEY, sid);
+    else localStorage.removeItem(LAST_SID_KEY);
+  }catch(e){}
+}
+function readLastSid(){
+  try{ return localStorage.getItem(LAST_SID_KEY) || ""; }catch(e){ return ""; }
+}
 
 async function loadBoard(){
   const url = "/api/admin/dashboard" + (CUR_SID ? ("?sid=" + encodeURIComponent(CUR_SID)) : "");
   const r = await fetch(url);
   if(r.status===401){ $("login").style.display="block"; $("board").style.display="none"; return; }
   DATA = await r.json();
+  // 以服务端返回的学生为准（记住的 sid 可能已被删除/停用，这时后端会回落到默认学生）
   CUR_SID = (DATA.student && DATA.student.sid) || CUR_SID;
+  if(CUR_SID) saveLastSid(CUR_SID);
   render();
   loadStudents();
 }
@@ -326,6 +355,8 @@ function fmtTime(t){
 
 function pickStudent(sid){
   CUR_SID = sid;
+  saveLastSid(sid);   // 手动切换即记住，下次打开停在这个学生
+  LG_EXPANDED.clear();  // 换人了，折叠状态重置
   loadBoard();
 }
 
@@ -361,7 +392,7 @@ async function delStudent(sid, name){
   if(!confirm(`确定删除「${name}」吗？\n\n删除后该学生的登录码失效，学习记录也会一起删除，无法恢复。`)) return;
   await fetch("/api/admin/students/"+encodeURIComponent(sid)+"?wipe=1",{method:"DELETE"});
   $("stuMsg").textContent = "已删除";
-  if(CUR_SID===sid) CUR_SID = null;
+  if(CUR_SID===sid){ CUR_SID = null; saveLastSid(""); }   // 清掉记忆，避免指向已删除的学生
   loadBoard();
 }
 
@@ -445,17 +476,28 @@ function render(){
       const total = items.reduce((a,b)=>a+b.seconds,0);
       const totalDisp = total<60 ? total+"秒" : (total<3600 ? fmtMin(total/60) : fmtMin(total/60));
       const wd = weekMap[new Date(day + "T00:00:00Z").getUTCDay()];
+      // 每天超过 5 条就折叠：先只显示前 5 条，点「显示全部」再展开
+      const LIMIT = 5;
+      const collapsed = items.length > LIMIT && !LG_EXPANDED.has(day);
+      const shown = collapsed ? items.slice(0, LIMIT) : items;
+      const moreBtn = items.length > LIMIT
+        ? `<button class="lg-more" onclick="toggleLogDay('${day}')">
+             <span class="caret">${LG_EXPANDED.has(day) ? "▾" : "▸"}</span>
+             ${LG_EXPANDED.has(day) ? "收起" : `显示全部 ${items.length} 条`}
+           </button>`
+        : "";
       return `<div class="lg-day">
         <div class="lg-dayhead">
           <b>${dayLabel(day)}</b>
           <span class="lg-wd">${wd}</span>
           <span class="lg-total">${items.length} 段 · 合计 ${totalDisp}</span>
         </div>
-        ${items.map(x=>`
+        ${shown.map(x=>`
           <div class="lg-row">
             <span class="lg-time">${x.start} <i>→</i> ${x.end}</span>
             <span class="lg-dur${x.ongoing?" on":""}">${x.ongoing?"进行中":x.duration}</span>
           </div>`).join("")}
+        ${moreBtn}
       </div>`;
     }).join("");
   }
@@ -541,6 +583,8 @@ async function saveCfg(){
     if(d.loggedIn){
       $("login").style.display="none";
       $("board").style.display="block";
+      // 恢复上次查看的学生（关浏览器前的浏览状态）
+      CUR_SID = readLastSid() || null;
       loadBoard();
       return;
     }
