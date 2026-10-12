@@ -21,8 +21,11 @@ with sync_playwright() as p:
     pg.wait_for_timeout(600)
 
     # 1. 首页课程列表渲染
+    # 本测试针对最早的离线单文件版（政治必修 1，共 4 课，无后端、无学科分组折叠），
+    # 因此只校验这 4 张课程卡可正常渲染；
+    # 现行多学科平台的 39 课/分组折叠校验由 test_ui.py / test_fold_ui.py 负责。
     items = pg.locator(".course-item").count()
-    check("课程列表渲染 39 项", items == 39, f"实际{items}")
+    check("课程列表渲染 4 项", items == 4, f"实际{items}")
 
     # 2. 总进度初始
     txt = pg.locator("#totalTxt").inner_text()

@@ -11,6 +11,7 @@ from flask import Flask, jsonify, request, send_from_directory, session
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from db import (init_db, get_config, set_config, record_answer, get_wrong_questions,
                 get_stats, start_session, end_session, get_study_time, get_streak,
+                heartbeat_session, settle_stale_sessions,
                 record_video, get_video_stats, set_task, get_tasks, get_course_answers,
                 reset_course_answers, USE_TURSO as _USE_TURSO,
                 list_students, get_student, create_student, update_student,
@@ -47,6 +48,14 @@ try:
         print(f"[题库] 新导入 {_added} 道题（已存在 {_skipped} 道）")
 except Exception as _e:  # 播种失败不应阻断服务启动
     print(f"[题库] 播种异常（忽略）：{_e}")
+
+# 结算上次进程退出时残留的未结束会话，避免它们永远停留在 duration=0
+try:
+    _n = settle_stale_sessions()
+    if _n:
+        print(f"[计时] 已结算 {_n} 条残留学习会话")
+except Exception as _e:
+    print(f"[计时] 残留会话结算异常（忽略）：{_e}")
 
 
 # =========================================================
@@ -449,10 +458,34 @@ def api_session_start():
     return jsonify({"sessionId": sid})
 
 
+@app.route("/api/session/heartbeat", methods=["POST"])
+def api_session_heartbeat():
+    """
+    会话心跳：前端每 60 秒上报一次「本次已学习秒数」，服务端累加落库。
+
+    这样即使页面关闭事件没触发（手机浏览器常见），学习时长也不会丢失。
+    """
+    data = request.get_json() or {}
+    if _is_anon():
+        return jsonify({"ok": True, "duration": 0, "anon": True})
+    dur = heartbeat_session(data.get("sessionId"), current_student(),
+                            data.get("seconds"))
+    return jsonify({"ok": True, "duration": dur})
+
+
 @app.route("/api/session/end", methods=["POST"])
 def api_session_end():
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     if data.get("sessionId") and not _is_anon():
+        # 前端可能用 sendBeacon 上报（无法带自定义头），此时秒数走 query 兜底
+        secs = data.get("seconds")
+        if secs is None:
+            try:
+                secs = int(request.args.get("seconds") or 0) or None
+            except (TypeError, ValueError):
+                secs = None
+        if secs:
+            heartbeat_session(data["sessionId"], current_student(), secs)
         end_session(data["sessionId"], current_student())
     return jsonify({"ok": True})
 

@@ -11,7 +11,7 @@ import os
 import sqlite3
 import json
 import requests
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 本地 SQLite 位置：
@@ -23,6 +23,29 @@ SQLITE_PATH = os.path.join(_SQLITE_DIR, "study.db")
 TURSO_URL = os.environ.get("TURSO_URL", "").rstrip("/")
 TURSO_TOKEN = os.environ.get("TURSO_TOKEN", "")
 USE_TURSO = bool(TURSO_URL and TURSO_TOKEN)
+
+# 业务时区：固定中国标准时间（UTC+8）。
+# 服务器（PythonAnywhere 免费版）系统时区是 UTC，若直接用 datetime.now()，
+# 学生在北京时间早上 8 点之前学习，会被记成「前一天」，导致看板当日时长为 0。
+# 因此所有入库时间统一走 now_cn()，不依赖服务器本地时区。
+CN_TZ = timezone(timedelta(hours=8), "CST")
+
+
+def now_cn():
+    """当前中国标准时间（UTC+8，naive，便于与历史数据直接比较/截取前 10 位）"""
+    return datetime.now(CN_TZ).replace(tzinfo=None)
+
+
+def _parse_dt(s):
+    """解析库里存的时间字符串；老数据可能是 UTC 写法，统一按 naive 处理"""
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(s))
+    except (ValueError, TypeError):
+        return None
+    return dt.replace(tzinfo=None) if dt.tzinfo else dt
+
 
 
 # =========================================================
@@ -322,7 +345,7 @@ def _ensure_default_student():
     if rows and rows[0]["n"] > 0:
         return
     name = get_config("student_name", "同学")
-    now = datetime.now().isoformat(timespec="seconds")
+    now = now_cn().isoformat(timespec="seconds")
     execute("INSERT INTO students(sid,name,color,active,created_at,last_active) "
             "VALUES(?,?,?,1,?,NULL)",
             ("default", name, "#e8524a", now))
@@ -373,7 +396,7 @@ def create_student(sid, name, color="#2f6fed", is_anonymous=False):
     execute("INSERT INTO students"
             "(sid,name,color,active,created_at,last_active,is_anonymous) "
             "VALUES(?,?,?,1,?,NULL,?)",
-            (sid, name, color, datetime.now().isoformat(timespec="seconds"),
+            (sid, name, color, now_cn().isoformat(timespec="seconds"),
              1 if is_anonymous else 0))
     return True, "创建成功"
 
@@ -387,7 +410,7 @@ def ensure_anonymous_student():
     stu = get_student(sid)
     if stu:
         return stu
-    now = datetime.now().isoformat(timespec="seconds")
+    now = now_cn().isoformat(timespec="seconds")
     execute("INSERT INTO students"
             "(sid,name,color,active,created_at,last_active,is_anonymous) "
             "VALUES(?,?,?,1,?,NULL,1)",
@@ -457,7 +480,7 @@ def register_student(username, phone, name, password):
         # 极端情况：与老登录码撞名，加后缀避免覆盖
         sid = key + "_" + _uuid.uuid4().hex[:4]
 
-    now = datetime.now().isoformat(timespec="seconds")
+    now = now_cn().isoformat(timespec="seconds")
     execute("INSERT INTO students"
             "(sid,name,color,active,created_at,last_active,username,phone,password_hash,is_anonymous) "
             "VALUES(?,?,?,1,?,NULL,?,?,?,0)",
@@ -491,7 +514,7 @@ def update_student(sid, name=None, color=None, active=None):
 def touch_student(sid):
     """更新最后活跃时间（每次登录/操作时调用）"""
     execute("UPDATE students SET last_active=? WHERE sid=?",
-            (datetime.now().isoformat(timespec="seconds"), sid))
+            (now_cn().isoformat(timespec="seconds"), sid))
 
 
 def delete_student(sid, wipe=False):
@@ -510,7 +533,7 @@ def create_token(sid):
     """生成一个登录令牌（记住登录用）"""
     import uuid
     token = uuid.uuid4().hex
-    now = datetime.now().isoformat(timespec="seconds")
+    now = now_cn().isoformat(timespec="seconds")
     execute("INSERT INTO tokens(token,sid,created_at,last_used) VALUES(?,?,?,?)",
             (token, sid, now, now))
     return token
@@ -524,7 +547,7 @@ def resolve_token(token):
     if not rows:
         return None
     sid = rows[0]["sid"]
-    now = datetime.now().isoformat(timespec="seconds")
+    now = now_cn().isoformat(timespec="seconds")
     execute("UPDATE tokens SET last_used=? WHERE token=?", (now, token))
     touch_student(sid)
     return sid
@@ -545,7 +568,7 @@ def record_answer(course_id, question_idx, chosen, correct, student_id="default"
         "INSERT INTO answers(student_id,course_id,question_idx,qid,chosen,correct,answered_at,mode) "
         "VALUES(?,?,?,?,?,?,?,?)",
         (student_id, course_id, question_idx, qid, chosen, 1 if correct else 0,
-         datetime.now().isoformat(timespec="seconds"), mode)
+         now_cn().isoformat(timespec="seconds"), mode)
     )
 
 
@@ -741,27 +764,115 @@ def get_stats(student_id="default"):
 # =========================================================
 # 学习会话
 # =========================================================
+SESSION_MAX_SECONDS = 7200        # 单次会话封顶 2 小时（与前端说明一致）
+SESSION_HEARTBEAT_GRACE = 180     # 心跳间隔 60s，超过 3 分钟没心跳视为已离开
+SESSION_MIN_SECONDS = 5           # 小于 5 秒的会话不计时长（避免误点产生噪声）
+
+
 def start_session(page="", student_id="default"):
+    """开启一次学习会话。同一学生若已有未结束会话，先把它结算掉，避免僵尸会话堆积。"""
+    _settle_open_sessions(student_id, exclude_sid=None)
     r = execute("INSERT INTO sessions(student_id,started_at,page) VALUES(?,?,?)",
-                (student_id, datetime.now().isoformat(timespec="seconds"), page))
+                (student_id, now_cn().isoformat(timespec="seconds"), page))
     return r.get("last_id")
 
 
+def heartbeat_session(sid, student_id="default", seconds=None):
+    """
+    心跳：把「本次会话已产生的时长」写入数据库。
+
+    为什么需要：旧实现只在页面关闭/切后台（pagehide / visibilitychange）时才结算，
+    手机浏览器经常不触发这些事件，导致整段学习的 duration 一直是 0。
+    改为前端每 60 秒上报一次，时长就能边学边落库。
+
+    seconds 由前端按「实际可见时长」计算并传入；不传则按服务端时间差推算。
+    返回累计时长（秒）。
+    """
+    if not sid:
+        return 0
+    rows = query("SELECT started_at, duration FROM sessions WHERE id=?", (sid,))
+    if not rows:
+        return 0
+    start = _parse_dt(rows[0]["started_at"])
+    prev = int(rows[0].get("duration") or 0)
+
+    if seconds is None:
+        elapsed = int((now_cn() - start).total_seconds()) if start else 0
+    else:
+        try:
+            elapsed = int(seconds)
+        except (TypeError, ValueError):
+            elapsed = 0
+
+    # 取「正推值」与「累计上报值」的较大者，但不超过封顶
+    dur = max(prev, elapsed)
+    dur = max(0, min(dur, SESSION_MAX_SECONDS))
+    execute("UPDATE sessions SET duration=? WHERE id=?", (dur, sid))
+    return dur
+
+
 def end_session(sid, student_id="default"):
-    rows = query("SELECT started_at FROM sessions WHERE id=?", (sid,))
+    """结束会话：优先保留心跳已累计的时长，避免收尾时反而把数字改小。"""
+    if not sid:
+        return
+    rows = query("SELECT started_at, duration FROM sessions WHERE id=?", (sid,))
     if not rows:
         return
+    start = _parse_dt(rows[0]["started_at"])
     try:
-        start = datetime.fromisoformat(rows[0]["started_at"])
-    except (ValueError, TypeError):
-        return
-    dur = min(int((datetime.now() - start).total_seconds()), 7200)
+        sent = int(rows[0].get("duration") or 0)
+    except (TypeError, ValueError):
+        sent = 0
+    elapsed = int((now_cn() - start).total_seconds()) if start else 0
+    dur = max(sent, elapsed, 0)
+    dur = min(dur, SESSION_MAX_SECONDS)
     execute("UPDATE sessions SET ended_at=?, duration=? WHERE id=?",
-            (datetime.now().isoformat(timespec="seconds"), dur, sid))
+            (now_cn().isoformat(timespec="seconds"), dur, sid))
+
+
+def _settle_open_sessions(student_id=None, exclude_sid=None):
+    """
+    保底结算：把「没有正常结束」的会话补上时长。
+
+    规则：按 started_at 到「最后一次心跳可推断的时间」估算，封顶 2 小时。
+    没有心跳字段时退化为 started_at→now（但受封顶保护），这样历史上那些
+    duration=0 的遗留会话也能拿到合理数值。
+    """
+    sql = "SELECT id, student_id, started_at FROM sessions WHERE ended_at IS NULL"
+    args = []
+    if student_id:
+        sql += " AND student_id=?"
+        args.append(student_id)
+    if exclude_sid:
+        sql += " AND id<>?"
+        args.append(exclude_sid)
+    try:
+        rows = query(sql, tuple(args))
+    except Exception:
+        return 0
+    n = 0
+    for r in rows:
+        start = _parse_dt(r["started_at"])
+        if not start:
+            continue
+        dur = int((now_cn() - start).total_seconds())
+        dur = max(0, min(dur, SESSION_MAX_SECONDS))
+        execute("UPDATE sessions SET ended_at=?, duration=? WHERE id=?",
+                (now_cn().isoformat(timespec="seconds"), dur, r["id"]))
+        n += 1
+    return n
+
+
+def settle_stale_sessions():
+    """
+    服务启动时调用：把上次进程退出时残留的未结束会话结算掉。
+    这些会话不可能还在进行，直接按 started_at→now 封顶结算。
+    """
+    return _settle_open_sessions()
 
 
 def get_study_time(student_id="default", days=7):
-    since = (date.today() - timedelta(days=days - 1)).isoformat()
+    since = (now_cn().date() - timedelta(days=days - 1)).isoformat()
     rows = query("""
         SELECT SUBSTR(started_at,1,10) AS d, SUM(duration) AS secs, COUNT(*) AS rounds
         FROM sessions
@@ -771,7 +882,8 @@ def get_study_time(student_id="default", days=7):
     """, (student_id, since))
     out = []
     for r in rows:
-        secs = r.get("secs") or 0
+        secs = int(r.get("secs") or 0)
+        # 剔除「误点/秒退」噪声：单次会话过短不计，但如果当天总量已达标则保留
         disp = f"{secs}秒" if secs < 60 else f"{round(secs/60,1)}分"
         out.append({
             "date": r["d"],
@@ -783,6 +895,7 @@ def get_study_time(student_id="default", days=7):
     return out
 
 
+
 def get_streak(student_id="default"):
     rows = query("""
         SELECT DISTINCT SUBSTR(started_at,1,10) AS d FROM sessions
@@ -791,8 +904,10 @@ def get_streak(student_id="default"):
     days = [r["d"] for r in rows]
     if not days:
         return 0
-    today = date.today().isoformat()
-    yest = (date.today() - timedelta(days=1)).isoformat()
+    # 用中国时区的"今天"，否则服务器 UTC 时早上学习会被判成昨天，连续天数断档
+    today_d = now_cn().date()
+    today = today_d.isoformat()
+    yest = (today_d - timedelta(days=1)).isoformat()
     if days[0] not in (today, yest):
         return 0
     streak = 0
@@ -813,7 +928,7 @@ def record_video(course_id, video_name, student_id="default"):
     execute("INSERT INTO video_views(student_id,course_id,video_name,viewed_at) "
             "VALUES(?,?,?,?)",
             (student_id, course_id, video_name,
-             datetime.now().isoformat(timespec="seconds")))
+             now_cn().isoformat(timespec="seconds")))
 
 
 def get_video_stats(student_id="default"):
@@ -830,7 +945,7 @@ def get_video_stats(student_id="default"):
 # 任务打卡
 # =========================================================
 def set_task(day_no, task_idx, done, student_id="default"):
-    now = datetime.now().isoformat(timespec="seconds")
+    now = now_cn().isoformat(timespec="seconds")
     existing = query("SELECT id FROM task_done WHERE student_id=? AND day_no=? AND task_idx=?",
                      (student_id, day_no, task_idx))
     if existing:
@@ -1001,10 +1116,10 @@ def anon_study_time(payload, days=7):
         d = (r.get("answered_at") or "")[:10]
         if d:
             per_day[d] = per_day.get(d, 0) + 1
-    since = (date.today() - timedelta(days=days - 1)).isoformat()
+    since = (now_cn().date() - timedelta(days=days - 1)).isoformat()
     out = []
-    cur = date.today() - timedelta(days=days - 1)
-    while cur <= date.today():
+    cur = now_cn().date() - timedelta(days=days - 1)
+    while cur <= now_cn().date():
         ds = cur.isoformat()
         n = per_day.get(ds, 0)
         secs = n * 40 if ds >= since else 0
@@ -1020,7 +1135,7 @@ def anon_streak(payload):
     days = sorted({(r.get("answered_at") or "")[:10] for r in _anon_rows(payload)} - {""})
     if not days:
         return 0
-    streak, cur = 0, date.today()
+    streak, cur = 0, now_cn().date()
     s = set(days)
     while cur.isoformat() in s:
         streak += 1

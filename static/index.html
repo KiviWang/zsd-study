@@ -736,29 +736,89 @@ window.addEventListener("DOMContentLoaded", ()=>{
 });
 
 /* ================= 会话计时 ================= */
+/* 思路：
+   1) 只统计「页面可见」的时间——切后台/锁屏即暂停，回前台再续算，避免虚增；
+   2) 每 60 秒心跳上报一次，把已学习时长落库，不依赖页面关闭事件（手机常不触发）；
+   3) 切后台/关页面时立即补一次上报，尽量减少误差。 */
+const HEARTBEAT_MS = 60000;
+let SESSION_TICK = null;      // 心跳定时器
+let SEC_VISIBLE = 0;          // 本次会话累计可见秒数（前端自算）
+let T0 = null;                // 本段可见期的起点（ms）
+
+function _flushVisible(){
+  /* 把当前可见段的时长并入累计值 */
+  if(T0 !== null){
+    SEC_VISIBLE += Math.round((Date.now() - T0) / 1000);
+    T0 = null;
+  }
+}
+function _pauseTick(){
+  _flushVisible();
+  if(SESSION_TICK){ clearInterval(SESSION_TICK); SESSION_TICK = null; }
+}
+function _resumeTick(){
+  if(T0 === null) T0 = Date.now();
+}
+
 async function startSession(page){
   try{
     const r = await api("/api/session/start",{method:"POST",body:JSON.stringify({page})});
-    const d = await r.json(); SESSION_ID = d.sessionId;
+    const d = await r.json();
+    SESSION_ID = d.sessionId;
+    SEC_VISIBLE = 0;
+    if(SESSION_ID){
+      _resumeTick();
+      if(SESSION_TICK) clearInterval(SESSION_TICK);
+      SESSION_TICK = setInterval(()=>{ beat(true); }, HEARTBEAT_MS);
+    }
   }catch(e){}
 }
+
+/* 上报一次时长。silent=true 时失败不打扰用户 */
+async function beat(silent){
+  if(!SESSION_ID) return;
+  _flushVisible();
+  const secs = SEC_VISIBLE;
+  if(T0 === null) T0 = Date.now();   // 继续计时
+  try{
+    await api("/api/session/heartbeat",{method:"POST",
+      body:JSON.stringify({sessionId:SESSION_ID, seconds:secs})});
+  }catch(e){ if(!silent) console.warn("心跳上报失败", e); }
+}
+
 function endSession(){
   if(!SESSION_ID) return;
-  const data = JSON.stringify({sessionId:SESSION_ID});
-  const h = {"Content-Type":"application/json"};
-  const t = getToken(); if(t) h["X-ZSD-Token"] = t;
-  if(navigator.sendBeacon){
-    navigator.sendBeacon("/api/session/end", new Blob([data],{type:"application/json"}));
-  }else{
-    api("/api/session/end",{method:"POST",body:data});
-  }
+  _flushVisible();
+  const payload = JSON.stringify({sessionId:SESSION_ID, seconds:SEC_VISIBLE});
+  const h = getToken();
+  /* 结束会话也带上最终秒数，服务端取心跳累计值与最终值的较大者 */
+  const data = JSON.stringify({sessionId:SESSION_ID, seconds:SEC_VISIBLE});
+  try{
+    const blob = new Blob([data],{type:"application/json"});
+    if(navigator.sendBeacon){
+      /* sendBeacon 无法自定义头，改为把 token 放 query 兜底 */
+      navigator.sendBeacon("/api/session/end?token=" + encodeURIComponent(h||"") +
+                           "&seconds=" + SEC_VISIBLE, blob);
+    }
+  }catch(e){}
+  _pauseTick();
   SESSION_ID = null;
+  SEC_VISIBLE = 0;
 }
+
 window.addEventListener("pagehide", endSession);
 window.addEventListener("beforeunload", endSession);
-/* 页面重新可见时若会话已结束则重启，保证时长统计连续 */
+
+/* 前后台切换：后台暂停计时并上报，回前台续算（保证时长只算真正在看的时间） */
 document.addEventListener("visibilitychange", ()=>{
-  if(!document.hidden && !SESSION_ID && ME){ startSession(location.hash||"course"); }
+  if(document.hidden){
+    if(SESSION_ID) beat(true);
+    _pauseTick();
+  }else{
+    if(!ME) return;
+    if(SESSION_ID){ _resumeTick(); }
+    else { startSession(location.hash || "course"); }
+  }
 });
 
 /* ================= 导航 ================= */
