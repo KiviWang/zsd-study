@@ -143,6 +143,7 @@
       <div class="sub" id="bSub">最近 7 天学习情况</div>
     </div>
     <div class="right">
+      <button class="btn-sm" onclick="viewAsStudent()">学生视角</button>
       <button class="btn-sm" onclick="refresh()">刷新</button>
       <button class="btn-sm" onclick="logout()">退出</button>
     </div>
@@ -243,6 +244,13 @@ async function logout(){
   $("pwd").value = "";
   $("err").textContent = "";
   const p = $("pwd"); if(p) p.focus();
+}
+
+/* 学生视角：跳到学生端，带上 from=admin 标记。
+   学生端据此才显示顶栏那个「家长入口」按钮——从学生端自己的入口进来是不会显示的。 */
+function viewAsStudent(){
+  // 同标签内跳转，手机上体验更自然；家长端登录态仍在 cookie 里，回来还是免密
+  location.href = "/?from=admin";
 }
 
 /* ---------- 看板 ---------- */

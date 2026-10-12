@@ -371,7 +371,7 @@
       <p id="appSub">人教版 · 高一上</p>
     </div>
     <div class="streak" id="streakBox">🔥 连续 0 天</div>
-    <a class="admin-btn" href="/admin" title="家长入口" aria-label="家长入口">👤</a>
+    <a class="admin-btn" id="adminEntryBtn" href="/admin" title="家长入口" aria-label="家长入口" style="display:none">👤</a>
     <div class="who" onclick="openWho()">
       <span class="who-name" id="whoName">…</span>
       <span class="who-caret">▾</span>
@@ -488,6 +488,7 @@ const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&g
 /* ================= 身份 / 登录 ================= */
 const TOKEN_KEY = "zsd_token";
 const ANON_KEY  = "zsd_anon";     // 匿名模式标记（本地隔离）
+const FROM_KEY  = "zsd_from";     // 入口来源：admin = 从家长端跳转来的
 let ME = null;   // 当前学生 {sid,name,color,...}
 
 function getToken(){ try{ return localStorage.getItem(TOKEN_KEY)||""; }catch(e){ return ""; } }
@@ -495,6 +496,24 @@ function setToken(t){ try{ localStorage.setItem(TOKEN_KEY, t); }catch(e){} }
 function clearToken(){ try{ localStorage.removeItem(TOKEN_KEY); }catch(e){} }
 function isAnon(){ try{ return localStorage.getItem(ANON_KEY)==="1"; }catch(e){ return false; } }
 function setAnon(v){ try{ v ? localStorage.setItem(ANON_KEY,"1") : localStorage.removeItem(ANON_KEY); }catch(e){} }
+
+/* 入口来源：只有从家长端点「学生视角」跳进来的，才显示顶栏的家长入口按钮。
+   用 sessionStorage：关掉标签即失效，符合「学生端 / 家长端两个入口各记各的」。
+   URL 上带 ?from=admin 时写一次；之后同一标签内切页面都保持。 */
+function isFromAdmin(){
+  try{
+    if(new URLSearchParams(location.search).get("from") === "admin"){
+      sessionStorage.setItem(FROM_KEY, "admin");
+    }
+    return sessionStorage.getItem(FROM_KEY) === "admin";
+  }catch(e){ return false; }
+}
+
+/** 刷新顶栏家长入口按钮的显隐（家长端进来的才显示） */
+function syncAdminEntry(){
+  const btn = $("adminEntryBtn");
+  if(btn) btn.style.display = isFromAdmin() ? "flex" : "none";
+}
 
 /* 统一请求封装：自动带登录令牌；匿名模式下把本地记录一并带上 */
 async function api(url, opts){
@@ -677,6 +696,8 @@ function enterApp(){
   // 匿名模式给个提示条，说明数据只存在本机
   const tip = $("anonTip");
   if(tip) tip.style.display = isAnon() ? "block" : "none";
+  // 家长入口按钮：仅当从家长端跳转进来时显示
+  syncAdminEntry();
   // 确保课程页为当前页（清掉残留 hash）
   const cur = (location.hash||"").replace("#","");
   const valid = ["scrCourse","scrDetail","scrPlan","scrWrong","scrMe"];
