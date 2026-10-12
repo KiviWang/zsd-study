@@ -1,39 +1,44 @@
 #!/usr/bin/env python3
 """
-清理「服务重启结算虚增」产生的异常学习时长。
+清理异常学习时长：把单次超长会话截断到合理上限，并标记结束。
 
 背景：
-  旧版 settle_stale_sessions() 按 SESSION_MAX_SECONDS（2 小时）封顶结算残留会话。
-  每次 PythonAnywhere Reload Web App，所有未结束会话都会被灌成 7200 秒，
-  反复几轮后当日时长就会累加到几百上千分钟（如 960 分 / 6856.8 分）。
+  旧版实现中，页面切后台只暂停计时、不结束会话，导致一个会话可以
+  跨几小时甚至一整天。例如孩子早上打开页面，晚上才关闭，一次会话
+  就会记录 8+ 小时，多次下来就是几百上千分钟。
 
 本脚本做的事（幂等、可重复执行）：
-  1. 把「明显异常」的会话时长压回合理值：
-     - 单条 > 单次合理上限（默认 2 小时=7200s，但重启虚增产物通常正好是 7200）
-     - 且该会话没有心跳痕迹（无独立心跳字段，用 ended_at - started_at 判断）
-  2. 更稳妥的做法：直接按「会话真实跨度」重算 duration，
-     即 duration = min(ended_at - started_at, 真实可见上限)，
-     这样把 7200 的虚增值还原成真实跨度。
-  3. 输出 before/after 对比。
+  1. 把「单条 duration 超过合理上限」的会话截断到上限（默认 30 分钟）
+  2. 把未结束的会话结算掉（用 started_at→ended_at 或 now）
+  3. 列出「会话数/总时长异常」的账号，提示可能是测试数据
+  4. 可选：删除某个学生的全部会话（用于清理测试账号）
 
-用法（本地）：
-    python3 scripts/fix_inflated_time.py --db data/study.db --dry-run
-    python3 scripts/fix_inflated_time.py --db data/study.db
-
-用法（PythonAnywhere，先备份再执行）：
+用法（PythonAnywhere，务必先备份）：
     cp ~/zsd-study/data/study.db ~/study_backup_$(date +%Y%m%d_%H%M%S).db
-    python3 ~/zsd-study/scripts/fix_inflated_time.py --db ~/zsd-study/data/study.db
+
+    # 1) 预览默认截断效果
+    python3 ~/zsd-study/scripts/fix_inflated_time.py \
+        --db ~/zsd-study/data/study.db --dry-run
+
+    # 2) 执行：把所有超过 30 分钟的会话截到 30 分钟
+    python3 ~/zsd-study/scripts/fix_inflated_time.py \
+        --db ~/zsd-study/data/study.db
+
+    # 3) 如果想把上限改短（例如 15 分钟）
+    python3 ~/zsd-study/scripts/fix_inflated_time.py \
+        --db ~/zsd-study/data/study.db --cap 900
+
+    # 4) 删除某个测试账号（如 wkh/default）的全部会话
+    python3 ~/zsd-study/scripts/fix_inflated_time.py \
+        --db ~/zsd-study/data/study.db --reset-student wkh
 """
 import argparse
 import os
 import sqlite3
 from datetime import datetime, timedelta
 
-# 与 app/db.py 保持一致
-SESSION_MAX_SECONDS = 7200
 SESSION_MIN_SECONDS = 5
-# 「可疑虚增值」特征：时长 >= 这个值，且会话真实跨度远小于它
-SUSPICIOUS_SEC = 1800
+DEFAULT_CAP_MINUTES = 30   # 默认单次会话最多 30 分钟，可自定义
 
 
 def parse(s):
@@ -46,10 +51,22 @@ def parse(s):
     return dt.replace(tzinfo=None) if dt.tzinfo else dt
 
 
+def fmt_sec(s):
+    s = int(s or 0)
+    if s < 60:
+        return f"{s}秒"
+    if s < 3600:
+        return f"{round(s/60,1)}分"
+    return f"{round(s/3600,1)}时"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", required=True, help="SQLite 数据库路径")
     ap.add_argument("--dry-run", action="store_true", help="只预览，不写库")
+    ap.add_argument("--cap", type=int, default=DEFAULT_CAP_MINUTES*60,
+                    help=f"单次会话封顶秒数，默认 {DEFAULT_CAP_MINUTES*60}（30 分钟）")
+    ap.add_argument("--reset-student", help="删除指定学生的全部会话（用于清理测试账号）")
     args = ap.parse_args()
 
     if not os.path.exists(args.db):
@@ -58,6 +75,17 @@ def main():
 
     con = sqlite3.connect(args.db)
     con.row_factory = sqlite3.Row
+
+    # 0) 删除测试账号
+    if args.reset_student:
+        n = con.execute("DELETE FROM sessions WHERE student_id=?",
+                        (args.reset_student,)).rowcount
+        if not args.dry_run:
+            con.commit()
+        print(f"🗑️ {'（预览）' if args.dry_run else ''}已删除学生 '{args.reset_student}' 的 {n} 条会话")
+        if args.dry_run:
+            con.close()
+            return 0
 
     rows = [dict(r) for r in con.execute(
         "SELECT id, student_id, started_at, ended_at, duration, page FROM sessions ORDER BY id")]
@@ -70,46 +98,82 @@ def main():
         a["n"] += 1
         a["tot"] += int(r["duration"] or 0)
     for sid, a in sorted(agg.items(), key=lambda x: -x[1]["tot"]):
-        print(f"  {sid:<18} {a['n']:>3} 次  {a['tot']:>8} 秒 = {round(a['tot']/60,1):>8} 分")
+        print(f"  {sid:<18} {a['n']:>3} 次  {a['tot']:>8} 秒 = {fmt_sec(a['tot']):>10}")
 
+    # 提示异常账号
+    print("\n⚠️ 以下账号会话数或总时长异常，可能是测试/调试数据：")
+    flagged = False
+    for sid, a in sorted(agg.items(), key=lambda x: -x[1]["tot"]):
+        if a["n"] > 20 or a["tot"] > 120*60:
+            flagged = True
+            print(f"  · {sid}: {a['n']} 次，累计 {fmt_sec(a['tot'])}")
+            print(f"    如需清空可执行：--reset-student {sid}")
+    if not flagged:
+        print("  未发现明显异常账号")
+
+    # 1) 截断超长会话
+    cap = max(args.cap, 60)  # 至少 1 分钟
     fixes = []
     for r in rows:
         dur = int(r["duration"] or 0)
-        if dur < SUSPICIOUS_SEC:
-            continue
+        # 未结束会话先按真实跨度计算 duration
         st = parse(r["started_at"])
-        et = parse(r["ended_at"])
+        et = parse(r["ended_at"]) or datetime.now()
         if not st:
             continue
-        # 真实跨度（会话实际持续多久）
-        span = int((et - st).total_seconds()) if et else dur
-        span = max(0, span)
-        # 若真实跨度显著小于记录时长，说明是虚增，压回真实跨度
-        if span < dur:
-            new_dur = span
-            # 跨度太短的直接记 0（误点/秒退）
-            if new_dur < SESSION_MIN_SECONDS:
-                new_dur = 0
-            new_dur = min(new_dur, SESSION_MAX_SECONDS)
-            if new_dur != dur:
-                fixes.append((r["id"], r["student_id"], dur, new_dur))
-                if not args.dry_run:
-                    con.execute("UPDATE sessions SET duration=? WHERE id=?",
-                                (new_dur, r["id"]))
+        span = max(0, int((et - st).total_seconds()))
+        base = dur if r["ended_at"] else span  # 未结束按跨度算
 
-    print(f"\n=== 待修正 {len(fixes)} 条（duration 虚增）===")
-    for i, sid, old, new in fixes[:40]:
-        print(f"  id={i:<4} {sid:<16} {old:>6}s → {new:>6}s  ({round(old/60,1)}分 → {round(new/60,1)}分)")
+        if base > cap:
+            new_dur = cap
+            fixes.append((r["id"], r["student_id"], base, new_dur, bool(r["ended_at"])))
+            if not args.dry_run:
+                now = datetime.now().isoformat(timespec="seconds")
+                end_at = r["ended_at"] or now
+                con.execute(
+                    "UPDATE sessions SET ended_at=?, duration=? WHERE id=?",
+                    (end_at, new_dur, r["id"]))
+
+    print(f"\n=== 待截断 {len(fixes)} 条（超过 {fmt_sec(cap)}）===")
+    for i, sid, old, new, was_ended in fixes[:40]:
+        tag = "已结束" if was_ended else "未结束"
+        print(f"  id={i:<4} {sid:<16} {fmt_sec(old):>10} → {fmt_sec(new):>10}  ({tag})")
     if len(fixes) > 40:
         print(f"  ... 其余 {len(fixes)-40} 条略")
 
-    if not args.dry_run:
+    # 2) 处理未结束会话（不管是否超长，都结算掉，避免后续 Reload 再结算）
+    opens = [dict(r) for r in con.execute(
+        "SELECT id, student_id, started_at, duration FROM sessions WHERE ended_at IS NULL")]
+    open_fixes = []
+    now = datetime.now().isoformat(timespec="seconds")
+    for r in opens:
+        st = parse(r["started_at"])
+        if not st:
+            continue
+        span = max(0, int((datetime.now() - st).total_seconds()))
+        new_dur = min(span, cap)
+        if new_dur < SESSION_MIN_SECONDS:
+            new_dur = 0
+        open_fixes.append((r["id"], r["student_id"], int(r["duration"] or 0), new_dur))
+        if not args.dry_run:
+            con.execute("UPDATE sessions SET ended_at=?, duration=? WHERE id=?",
+                        (now, new_dur, r["id"]))
+
+    if open_fixes:
+        print(f"\n=== 待结算 {len(open_fixes)} 条未结束会话 ===")
+        for i, sid, old, new in open_fixes[:20]:
+            print(f"  id={i:<4} {sid:<16} {fmt_sec(old):>10} → {fmt_sec(new):>10}")
+        if len(open_fixes) > 20:
+            print(f"  ... 其余 {len(open_fixes)-20} 条略")
+
+    if not args.dry_run and (fixes or open_fixes):
         con.commit()
         print("\n✅ 已写库")
+    elif args.dry_run:
+        print("\n🏃 仅预览，未写库")
 
     # after
-    rows2 = [dict(r) for r in con.execute(
-        "SELECT id, student_id, duration FROM sessions")]
+    rows2 = [dict(r) for r in con.execute("SELECT id, student_id, duration FROM sessions")]
     print(f"\n=== 修复后：各生时长 ===")
     agg2 = {}
     for r in rows2:
@@ -117,7 +181,9 @@ def main():
         a["n"] += 1
         a["tot"] += int(r["duration"] or 0)
     for sid, a in sorted(agg2.items(), key=lambda x: -x[1]["tot"]):
-        print(f"  {sid:<18} {a['n']:>3} 次  {a['tot']:>8} 秒 = {round(a['tot']/60,1):>8} 分")
+        print(f"  {sid:<18} {a['n']:>3} 次  {a['tot']:>8} 秒 = {fmt_sec(a['tot']):>10}")
+
+    print(f"\n未结束会话：{con.execute('SELECT COUNT(*) FROM sessions WHERE ended_at IS NULL').fetchone()[0]} 条")
 
     con.close()
     return 0

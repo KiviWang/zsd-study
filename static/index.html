@@ -809,15 +809,14 @@ function endSession(){
 window.addEventListener("pagehide", endSession);
 window.addEventListener("beforeunload", endSession);
 
-/* 前后台切换：后台暂停计时并上报，回前台续算（保证时长只算真正在看的时间） */
+/* 前后台切换：后台直接结束本次会话（已上报的可见时长落库），回前台开启新会话。
+   这样一次会话只记录一段"连续可见学习"，避免页面在后台挂几小时导致会话跨度过大。 */
 document.addEventListener("visibilitychange", ()=>{
   if(document.hidden){
-    if(SESSION_ID) beat(true);
-    _pauseTick();
+    if(SESSION_ID) endSession();
   }else{
     if(!ME) return;
-    if(SESSION_ID){ _resumeTick(); }
-    else { startSession(location.hash || "course"); }
+    startSession(location.hash || "course");
   }
 });
 
