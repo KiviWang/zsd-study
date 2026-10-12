@@ -16,9 +16,13 @@
   html,body{margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
     background:var(--bg);color:var(--text);font-size:15px;line-height:1.6;padding-bottom:84px}
-  .topbar{position:sticky;top:0;z-index:50;background:rgba(245,246,248,.94);
-    backdrop-filter:saturate(180%) blur(12px);-webkit-backdrop-filter:saturate(180%) blur(12px);
-    border-bottom:1px solid var(--line)}
+  /* 顶部栏：不用 position:sticky（Safari/iOS 常与渲染层出 bug），改用 fixed 定位。
+     通过 body.has-topbar 给主界面内容预留 64px 顶部空间。 */
+  .topbar{position:fixed;top:0;left:0;right:0;z-index:50;background:#f5f6f8;
+    border-bottom:1px solid var(--line);
+    -webkit-transform:translateZ(0);transform:translateZ(0);
+    will-change:transform}
+  body.has-topbar{padding-top:64px}
   .topbar-inner{max-width:520px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:10px}
   .logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,#e8524a,#d97b2b);
     color:#fff;font-size:16px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
@@ -203,8 +207,9 @@
   .bar{height:7px;background:var(--line);border-radius:5px;overflow:hidden;margin:8px 0 4px}
   .bar i{display:block;height:100%;background:linear-gradient(90deg,#e8524a,#d97b2b);
     border-radius:5px;transition:width .4s}
-  .navbar{position:fixed;bottom:0;left:0;right:0;z-index:60;background:rgba(255,255,255,.96);
-    backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-top:1px solid var(--line);
+  /* 底部导航：同样避开 backdrop-filter，用不透明背景保证 Safari 稳定渲染 */
+  .navbar{position:fixed;bottom:0;left:0;right:0;z-index:60;background:#fff;
+    border-top:1px solid var(--line);
     display:flex;max-width:520px;margin:0 auto;padding:6px 0 calc(6px + env(safe-area-inset-bottom))}
   .nav{flex:1;text-align:center;padding:6px 0;cursor:pointer;color:var(--text3);font-size:11px;
     border:none;background:none;font-family:inherit;position:relative}
@@ -665,6 +670,7 @@ async function doLogout(){
 function enterApp(){
   $("scrLogin").classList.remove("active");
   $("mainTopbar").style.display = "block";
+  document.body.classList.add("has-topbar");
   const nm = (ME && ME.name) || "同学";
   $("whoName").textContent = nm;
   $("greet").textContent = (ME && ME.name ? ME.name + "，" : "") + "今天想学哪一课？";
@@ -700,6 +706,7 @@ function showLogin(){
   });
   $("scrLogin").classList.add("active");
   $("mainTopbar").style.display = "none";
+  document.body.classList.remove("has-topbar");
 }
 
 /* 启动时判断登录状态 */
