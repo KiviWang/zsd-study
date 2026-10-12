@@ -119,7 +119,8 @@
 <body>
 
 <!-- ============ 登录 ============ -->
-<div id="login">
+<!-- 默认隐藏：先向后端确认登录态，已登录则直接进看板，避免闪一下登录页 -->
+<div id="login" style="display:none">
   <div class="login-card">
     <div class="ic">👨‍👩‍👧</div>
     <h1>家长端</h1>
@@ -127,7 +128,8 @@
     <input type="password" id="pwd" placeholder="密码" onkeydown="if(event.key==='Enter')doLogin()">
     <button onclick="doLogin()">进入看板</button>
     <div class="login-err" id="err"></div>
-    <p class="login-tip">默认为适应期密码 888888<br>如需修改，可在看板底部「设置」中更改</p>
+    <p class="login-tip">默认为适应期密码 888888<br>如需修改，可在看板底部「设置」中更改<br>
+      <span style="color:var(--ok)">登录后 30 天内免密自动进入</span></p>
     <a class="back-link" href="/">‹ 返回学生端</a>
   </div>
 </div>
@@ -234,8 +236,13 @@ async function doLogin(){
   }
 }
 async function logout(){
-  await fetch("/api/admin/logout",{method:"POST"});
-  location.reload();
+  try{ await fetch("/api/admin/logout",{method:"POST"}); }catch(e){}
+  // 直接切回登录页，避免 reload 时再次命中自动登录判断造成闪烁
+  $("board").style.display="none";
+  $("login").style.display="block";
+  $("pwd").value = "";
+  $("err").textContent = "";
+  const p = $("pwd"); if(p) p.focus();
 }
 
 /* ---------- 看板 ---------- */
@@ -516,14 +523,24 @@ async function saveCfg(){
 }
 
 /* ---------- 初始化 ---------- */
+/* 打开页面时先问后端「我登录了吗」：
+   - 已登录（cookie 有效，30 天内）→ 直接进看板，不用再输密码
+   - 未登录 → 显示登录页 */
 (async function(){
-  const r = await fetch("/api/admin/check");
-  const d = await r.json();
-  if(d.loggedIn){
-    $("login").style.display="none";
-    $("board").style.display="block";
-    loadBoard();
-  }
+  try{
+    const r = await fetch("/api/admin/check");
+    const d = await r.json();
+    if(d.loggedIn){
+      $("login").style.display="none";
+      $("board").style.display="block";
+      loadBoard();
+      return;
+    }
+  }catch(e){}
+  // 未登录 / 请求失败 → 显示登录页
+  $("login").style.display="block";
+  $("board").style.display="none";
+  const p = $("pwd"); if(p) p.focus();
 })();
 </script>
 </body>

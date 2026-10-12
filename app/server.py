@@ -6,6 +6,7 @@
 import os
 import sys
 import json
+from datetime import timedelta
 from flask import Flask, jsonify, request, send_from_directory, session
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -30,6 +31,12 @@ from bank import qid_by_idx as _resolve_qid_by_idx
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 app = Flask(__name__, static_folder=os.path.join(BASE, "static"), static_url_path="")
 app.secret_key = os.environ.get("SECRET_KEY", "zsd-study-platform-2026-local")
+
+# 家长端登录状态持久化：默认 Flask session cookie 是「会话级」的，
+# 关掉浏览器就失效，每次都要重新输密码。这里改为 30 天有效的持久 cookie。
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
 
 DEFAULT_STUDENT = "default"   # 旧数据的归属者（首个学生）
 TOKEN_HEADER = "X-ZSD-Token"
@@ -506,6 +513,7 @@ def api_admin_login():
     pwd = str(data.get("password", ""))
     if pwd == get_config("admin_password", "888888"):
         session["admin"] = True
+        session.permanent = True   # 持久化：写成 30 天有效的 cookie，下次免登录
         return jsonify({"ok": True})
     return jsonify({"ok": False, "msg": "密码错误"}), 401
 
