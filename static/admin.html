@@ -242,19 +242,36 @@
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
-/* 带超时的请求封装。
-   PythonAnywhere 免费版响应偶发 5~11 秒，iOS Safari / 微信对挂起请求容忍度低，
-   会直接提示「页面无响应」。12 秒强制中断，交由调用方给出重试提示。 */
+/* 带超时 + 自动重试的请求封装。
+   背景：服务器在 AWS 美东，国内访问需跨境，链路偶发连接重置/超时；
+   iOS Safari 对连接重试保守，容易直接提示「页面无响应」。
+   策略：网络错误/超时才重试；4xx/5xx 属于业务结果直接返回。
+         GET 重试 2 次，其他方法重试 1 次（避免重复提交）。 */
 const API_TIMEOUT_MS = 12000;
+const API_RETRY_MAX = 2;
+
+function _sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
 async function jfetch(url, opts){
   opts = opts || {};
-  const ctrl = new AbortController();
-  const timer = setTimeout(()=>{ try{ ctrl.abort(); }catch(e){} }, API_TIMEOUT_MS);
-  try{
-    return await fetch(url, Object.assign({}, opts, {signal: ctrl.signal}));
-  }finally{
-    clearTimeout(timer);
+  const method = String(opts.method || "GET").toUpperCase();
+  const idem = (method === "GET" || method === "HEAD");
+  const maxTry = 1 + (idem ? API_RETRY_MAX : 1);
+  let lastErr = null;
+
+  for(let i = 0; i < maxTry; i++){
+    const ctrl = new AbortController();
+    const timer = setTimeout(()=>{ try{ ctrl.abort(); }catch(e){} }, API_TIMEOUT_MS);
+    try{
+      return await fetch(url, Object.assign({}, opts, {signal: ctrl.signal}));
+    }catch(e){
+      lastErr = e;
+      if(i < maxTry - 1) await _sleep(i === 0 ? 400 : 1000);
+    }finally{
+      clearTimeout(timer);
+    }
   }
+  throw lastErr || new Error("network error");
 }
 
 /* ---------- 登录 ---------- */

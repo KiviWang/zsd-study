@@ -516,10 +516,28 @@ function syncAdminEntry(){
 }
 
 /* 统一请求封装：自动带登录令牌；匿名模式下把本地记录一并带上。
-   必须带超时：PythonAnywhere 免费版响应偶发要 5~11 秒，iOS Safari/微信对挂起的
-   请求容忍度低，会直接提示「页面无响应」。这里 12 秒强制中断，让前端能给出重试提示，
-   而不是让整个页面卡死。 */
+   带超时 + 自动重试。
+   背景：服务器在 AWS 美东，国内访问需跨境，中国移动链路偶发连接重置/超时。
+   iOS Safari 对连接重试更保守，容易出现「页面无响应」，而重试一两次通常就能通。
+   策略：
+     - 只有「网络错误 / 超时」才重试（4xx/5xx 属业务结果，直接返回给调用方）
+     - 非幂等请求（POST/DELETE）重试可能造成重复提交，默认只重试 1 次
+     - 指数退避：400ms → 1000ms */
 const API_TIMEOUT_MS = 12000;
+const API_RETRY_MAX = 2;
+
+function _sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+async function _fetchOnce(url, init, timeoutMs){
+  const ctrl = new AbortController();
+  const timer = setTimeout(()=>{ try{ ctrl.abort(); }catch(e){} }, timeoutMs);
+  try{
+    return await fetch(url, Object.assign({}, init, {signal: ctrl.signal}));
+  }finally{
+    clearTimeout(timer);
+  }
+}
+
 async function api(url, opts){
   opts = opts || {};
   const h = Object.assign({"Content-Type":"application/json"}, opts.headers||{});
@@ -528,19 +546,44 @@ async function api(url, opts){
   if(isAnon()){
     try{ h["X-ZSD-Anon"] = JSON.stringify(anonStore.read()); }catch(e){}
   }
-  // 外部已传 signal 则尊重它；否则自建一个带超时的 AbortController
-  let ctrl = opts.signal ? null : new AbortController();
   const init = Object.assign({}, opts, {headers:h});
-  if(ctrl) init.signal = ctrl.signal;
-  let timer = null;
-  if(ctrl){
-    timer = setTimeout(()=>{ try{ ctrl.abort(); }catch(e){} }, API_TIMEOUT_MS);
+  delete init.signal;
+
+  const method = String(init.method || "GET").toUpperCase();
+  // 幂等方法多试几次；非幂等（可能重复计分）只额外试 1 次
+  const idem = (method === "GET" || method === "HEAD");
+  const maxTry = 1 + (idem ? API_RETRY_MAX : 1);
+
+  let lastErr = null;
+  for(let i = 0; i < maxTry; i++){
+    try{
+      return await _fetchOnce(url, init, API_TIMEOUT_MS);
+    }catch(e){
+      lastErr = e;
+      // 还有重试机会就退避一下再来
+      if(i < maxTry - 1) await _sleep(i === 0 ? 400 : 1000);
+    }
   }
+  throw lastErr || new Error("network error");
+}
+
+/* ============ 离线兜底缓存 ============ */
+/* 服务器在海外，国内访问偶发跨境抖动。把关键接口的最后一次成功结果存在本机，
+   当请求彻底失败（重试也没用）时用缓存渲染，保证页面「有东西可看」而不是空白。
+   注意：只在失败时才用，成功永远以服务端为准。 */
+const CACHE_KEY = "zsd_api_cache";
+function cacheGet(url){
   try{
-    return await fetch(url, init);
-  }finally{
-    if(timer) clearTimeout(timer);
-  }
+    const m = JSON.parse(localStorage.getItem(CACHE_KEY) || "{}");
+    return m[url] || null;
+  }catch(e){ return null; }
+}
+function cachePut(url, data){
+  try{
+    const m = JSON.parse(localStorage.getItem(CACHE_KEY) || "{}");
+    m[url] = data;
+    localStorage.setItem(CACHE_KEY, JSON.stringify(m));
+  }catch(e){}
 }
 
 /* ============ 匿名本地存储 ============ */
@@ -914,8 +957,21 @@ function toggleFold(subj){
 }
 
 async function loadCourses(){
-  const r = await api("/api/courses");
-  const d = await r.json();
+  let d = null;
+  try{
+    const r = await api("/api/courses");
+    d = await r.json();
+    cachePut("/api/courses", d);      // 成功则刷新缓存
+  }catch(e){
+    // 跨境网络彻底失败：用上次的缓存渲染，至少让页面能用（进度可能略旧）
+    d = cacheGet("/api/courses");
+    if(d) setMsg("网络不稳定，已显示上次的数据", true);
+  }
+  if(!d || !d.courses){ 
+    $("courseList").innerHTML = `<div class="empty">课程加载失败<br>
+      <span style="font-size:12px">网络不稳定，请稍后下拉重试</span></div>`;
+    return;
+  }
   COURSES = d.courses;
   $("streakBox").textContent = "🔥 连续 " + (d.streak||0) + " 天";
   // 问候语优先用当前登录学生，其次用后端配置的学生称呼
