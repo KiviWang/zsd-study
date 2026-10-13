@@ -9,3 +9,5 @@ venv/
 .DS_Store
 _shots/
 shots2/
+docs/essay_shots/
+docs/shots/

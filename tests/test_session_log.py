@@ -5,7 +5,8 @@
 覆盖：
   A. get_session_log 基本输出：起止时间、时长、按天倒序
   B. 跨天会话标注（23:40 → 00:10(+1天)）
-  C. 未结束会话标记 ongoing，end 用当前时间兜底
+  C. 未结束会话标记 ongoing，end 用当前时间兜底（仅当仍在心跳）
+  C2. 已失联的僵尸会话不再标 ongoing，结束点收敛为「开始 + 上报时长」
   D. 噪声过滤（< 5 秒的误点会话不计入）
   E. 天数窗口（超出 7 天的老数据不返回）
 """
@@ -35,12 +36,21 @@ def reset():
     db.execute("DELETE FROM sessions WHERE student_id=?", (STU,))
 
 
-def add(st_dt, et_dt=None, secs=0):
+def add(st_dt, et_dt=None, secs=0, beat=None):
+    """
+    插入一条会话。
+
+    beat: 最后一次心跳时刻，默认与 started 相同。
+          活跃（未结束且仍在心跳）的会话必须显式传入「刚刚」的时间，
+          因为 ongoing 判定现在以 last_beat_at 为唯一依据。
+    """
+    b = beat if beat is not None else st_dt
     db.execute(
-        "INSERT INTO sessions(student_id,started_at,ended_at,duration,page) VALUES(?,?,?,?,?)",
+        "INSERT INTO sessions(student_id,started_at,ended_at,duration,page,last_beat_at) "
+        "VALUES(?,?,?,?,?,?)",
         (STU, st_dt.isoformat(timespec="seconds"),
          et_dt.isoformat(timespec="seconds") if et_dt else None,
-         secs, "course"))
+         secs, "course", b.isoformat(timespec="seconds")))
 
 
 def main():
@@ -77,15 +87,37 @@ def main():
 
     print()
     print("=" * 60)
-    print("【C】未结束会话标 ongoing")
+    print("【C】未结束会话标 ongoing（仍在心跳才算进行中）")
     print("=" * 60)
     reset()
     st = now - timedelta(minutes=10)
-    add(st, None, 600)
+    # 关键：活跃会话必须带「刚刚」的心跳，否则按新口径会被判为僵尸
+    add(st, None, 600, beat=now - timedelta(seconds=15))
     logs = db.get_session_log(STU, 7)
     chk("返回 1 条", len(logs) == 1, str(len(logs)))
     chk("ongoing 为 True", logs[0]["ongoing"] is True, str(logs[0]["ongoing"]))
     chk("end 已用当前时间兜底（非空）", bool(logs[0]["end"]), logs[0]["end"])
+
+    print()
+    print("=" * 60)
+    print("【C2】已失联的会话不再标 ongoing（iOS 杀进程场景）")
+    print("=" * 60)
+    reset()
+    # 取一个「今天之内」的起点，避免在午夜零点后跑测试时跨到昨天。
+    # 当前时刻若不足 1 小时（如 00:15），则退到 00:00 之后 5 分钟，保证仍在今天。
+    st = now - timedelta(minutes=15)
+    if st.date() != now.date():
+        st = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    add(st, None, 600, beat=st)
+    logs = db.get_session_log(STU, 7)
+    chk("返回 1 条", len(logs) == 1, str(len(logs)))
+    if logs:
+        chk("ongoing 为 False（不再挂「进行中」）", logs[0]["ongoing"] is False,
+            str(logs[0]["ongoing"]))
+        chk("时长保持上报的 10 分", logs[0]["duration"] == "10分", logs[0]["duration"])
+        exp_end = (st + timedelta(seconds=600)).strftime("%H:%M")
+        chk("结束时间收敛为 开始+10分", logs[0]["end"].startswith(exp_end),
+            logs[0]["end"])
 
     print()
     print("=" * 60)

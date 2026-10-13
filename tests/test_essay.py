@@ -164,10 +164,14 @@ check(ae["stats"]["total"] == 0, "匿名初始统计 0")
 # 匿名作答：答案存在本地，下次请求带 anon 头
 st, raw2 = req("/api/question/" + _anon_qid)
 wrong2 = 0 if raw2["a"] != 0 else 1
+# 注意：时间戳必须用「中国时区当天」，后端按今天过滤匿名记录。
+# 早期这里写死了固定日期，跨天跑测试就会失败。
+_now_cn = _t.gmtime(_t.time() + 8 * 3600)
+_at = "%04d-%02d-%02dT10:00:00" % (_now_cn.tm_year, _now_cn.tm_mon, _now_cn.tm_mday)
 anon_payload = {
     "answers": [{
         "cid": "p1", "qid": _anon_qid, "idx": -1, "chosen": wrong2,
-        "correct": False, "mode": "essay", "at": "2026-10-13T10:00:00"
+        "correct": False, "mode": "essay", "at": _at
     }]
 }
 st, ans2 = req("/api/essay/answer", "POST",

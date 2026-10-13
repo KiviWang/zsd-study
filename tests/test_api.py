@@ -86,6 +86,10 @@ ck("打卡记录已存", done.get("1",{}).get("0")==True, str(done))
 sr = s.post(f"{BASE}/api/session/start", json={"page":"course"}).json()
 ck("会话创建", "sessionId" in sr, str(sr.get("sessionId")))
 sid = sr["sessionId"]
+# 时长以「前端心跳上报值」为唯一依据（零心跳一律记 0），
+# 所以要模拟真实前端：先上报一次已学习秒数，否则 end 时长为 0。
+hb = s.post(f"{BASE}/api/session/heartbeat", json={"sessionId":sid, "seconds":120}).json()
+ck("心跳上报成功（120 秒）", hb.get("duration") == 120, str(hb))
 
 # ---------- 7. 视频观看 ----------
 r = s.post(f"{BASE}/api/video/view", json={"courseId":"p1","videoName":"《社会主义五百年》第1集"})

@@ -80,9 +80,11 @@ chk("但 duration 已落库，不再依赖关闭事件", int(row["duration"]) ==
 
 print()
 print("=" * 60)
-print("【C】保底结算：未结束的会话也能拿到时长，但不虚增")
+print("【C】保底结算：零心跳的残余会话一律记 0，绝不虚增")
 print("=" * 60)
-# 造一条"30 分钟前开始、从未结束、duration=0"的僵尸会话（模拟旧版缺陷产物）
+# 造一条"30 分钟前开始、从未结束、duration=0"的残余会话。
+# 这正是用户在家长端看到异常长条的那类脏数据来源：
+# 旧版会把「现在 - 开始」的墙钟差补进去（30 分钟 → 甚至跨夜 7 小时）。
 old_start = (db.now_cn() - timedelta(minutes=30)).isoformat(timespec="seconds")
 db.execute("INSERT INTO sessions(student_id,started_at,duration) VALUES(?,?,0)", (STU, old_start))
 zombie_id = db.query("SELECT MAX(id) AS m FROM sessions WHERE student_id=?", (STU,))[0]["m"]
@@ -91,20 +93,20 @@ before = {r["date"]: r["seconds"] for r in db.get_study_time(STU, 7)}
 n = db._settle_open_sessions(STU)
 chk("结算函数处理了未结束会话", n >= 1, f"处理 {n} 条")
 z = db.query("SELECT duration, ended_at FROM sessions WHERE id=?", (zombie_id,))[0]
-chk("僵尸会话按真实跨度补齐（≈1800 秒，未超2小时封顶）",
-    1700 <= int(z["duration"]) <= 1900, str(z["duration"]))
+chk("零心跳会话时长记 0（不把 30 分钟墙钟差算作学习）",
+    int(z["duration"]) == 0, str(z["duration"]))
 chk("僵尸会话 ended_at 已写入", z["ended_at"] is not None, str(z["ended_at"]))
 
 after = {r["date"]: r["seconds"] for r in db.get_study_time(STU, 7)}
 today = db.now_cn().date().isoformat()
-chk("当日时长已包含结算结果（不再是 0 秒）",
-    after.get(today, 0) >= 1800, str(after.get(today)))
+chk("当日时长不被结算虚增",
+    after.get(today, 0) == before.get(today, 0), f"{before.get(today,0)} → {after.get(today,0)}")
 
 print()
 print("=" * 60)
-print("【C2】服务重启结算：只补心跳宽限期，绝不虚增成 2 小时")
+print("【C2】服务重启结算：零心跳残留一律记 0，绝不虚增成 2 小时")
 print("=" * 60)
-# 模拟 PythonAnywhere 上遗留多日的未结束会话：若按 2 小时封顶会累加出天文数字
+# 模拟 PythonAnywhere 上遗留多日的未结束会话：旧版按 2 小时封顶会累加出天文数字
 ancient = (db.now_cn() - timedelta(days=3)).isoformat(timespec="seconds")
 db.execute("INSERT INTO sessions(student_id,started_at,duration) VALUES(?,?,0)", (STU, ancient))
 ancient_id = db.query("SELECT MAX(id) AS m FROM sessions WHERE student_id=?", (STU,))[0]["m"]
@@ -112,8 +114,8 @@ ancient_id = db.query("SELECT MAX(id) AS m FROM sessions WHERE student_id=?", (S
 n2 = db.settle_stale_sessions()
 chk("启动结算处理了残留会话", n2 >= 1, f"处理 {n2} 条")
 a = db.query("SELECT duration, ended_at FROM sessions WHERE id=?", (ancient_id,))[0]
-chk("多日前的僵尸会话只补 3 分钟（心跳宽限期），不是 7200 秒",
-    int(a["duration"]) == db.SESSION_HEARTBEAT_GRACE, str(a["duration"]))
+chk("多日前的残留会话记 0（不是 7200 秒，也不是宽限期 180 秒）",
+    int(a["duration"]) == 0, str(a["duration"]))
 chk("该会话已标记结束", a["ended_at"] is not None, str(a["ended_at"]))
 
 # 关键回归：连续多次「重启」不应让时长持续膨胀

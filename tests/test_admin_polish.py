@@ -4,10 +4,14 @@
 1) 浏览状态保持：关浏览器再打开，仍停在上次查看的那个学生
 2) 学习记录折叠：某天记录 > 5 条时只显示前 5 条，点「显示全部」才展开
 
-前置：服务需在 5097 端口运行，且库里已有 stua / stub 两个学生，
-      （小甲）今天 8 条会话、昨天 3 条会话。
+前置：服务需在 5097 端口运行。测试会自动准备数据：
+      stua（小甲）今天 8 条会话、昨天 3 条会话；stub（小乙）作为切换对象。
 """
+import os
 import pathlib
+import sys
+import requests
+from datetime import timedelta
 from playwright.sync_api import sync_playwright
 
 BASE = "http://127.0.0.1:5097"
@@ -22,7 +26,46 @@ def ck(name, cond, extra=""):
     print(f"{'✓' if cond else '✗'} {name} {extra}")
 
 
+def seed():
+    """
+    造出测试所需的学生与会话数据（幂等）。
+
+    学习记录同时依赖 sessions 表，直接用 DB 层写入最省事。
+    """
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
+    import db  # noqa: E402
+    db.init_db()
+
+    adm = requests.Session()
+    adm.post(f"{BASE}/api/admin/login", json={"password": "888888"})
+    for sid, name in (("stua", "小甲"), ("stub", "小乙")):
+        adm.post(f"{BASE}/api/admin/students", json={"sid": sid, "name": name})
+
+    # 清掉历史残留，保证条数确定
+    db.execute("DELETE FROM sessions WHERE student_id IN ('stua','stub')")
+    now = db.now_cn()
+    today0 = now.replace(hour=8, minute=0, second=0, microsecond=0)
+
+    def put(sid, start, secs):
+        db.execute(
+            "INSERT INTO sessions(student_id,started_at,ended_at,duration,page,last_beat_at) "
+            "VALUES(?,?,?,?,?,?)",
+            (sid, start.isoformat(timespec="seconds"),
+             (start + timedelta(seconds=secs)).isoformat(timespec="seconds"),
+             secs, "course", (start + timedelta(seconds=secs)).isoformat(timespec="seconds")))
+
+    # 小甲：今天 8 段（每段间隔 30 分钟，各 10 分钟）、昨天 3 段
+    for i in range(8):
+        put("stua", today0 + timedelta(minutes=30 * i), 600)
+    y0 = (now - timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+    for i in range(3):
+        put("stua", y0 + timedelta(minutes=30 * i), 600)
+    # 小乙：一段即可，作为切换对象
+    put("stub", today0, 600)
+
+
 def main():
+    seed()
     with sync_playwright() as p:
         b = p.chromium.launch()
         ctx = b.new_context(viewport={"width": 390, "height": 844})
