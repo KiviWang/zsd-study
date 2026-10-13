@@ -785,7 +785,12 @@ def heartbeat_session(sid, student_id="default", seconds=None):
     手机浏览器经常不触发这些事件，导致整段学习的 duration 一直是 0。
     改为前端每 60 秒上报一次，时长就能边学边落库。
 
-    seconds 由前端按「实际可见时长」计算并传入；不传则按服务端时间差推算。
+    seconds 由前端按「实际可见时长」计算并传入。
+    重要：**不再用「now - started_at」的墙钟差作为兜底**。
+    因为页面可能挂机很久（iOS 杀进程不触发事件），墙钟差会把挂机时间算成学习时间；
+    而前端每秒都在自己累加"可见时长"，它的数字才是可信的。
+    没有 seconds 时取 max(prev, 一个心跳周期)，只做最小补偿。
+
     返回累计时长（秒）。
     """
     if not sid:
@@ -793,16 +798,16 @@ def heartbeat_session(sid, student_id="default", seconds=None):
     rows = query("SELECT started_at, duration FROM sessions WHERE id=?", (sid,))
     if not rows:
         return 0
-    start = _parse_dt(rows[0]["started_at"])
     prev = int(rows[0].get("duration") or 0)
 
     if seconds is None:
-        elapsed = int((now_cn() - start).total_seconds()) if start else 0
+        # 无上报值时，只补一个心跳周期（60s），绝不用墙钟差（可能是几小时）
+        elapsed = prev + 60
     else:
         try:
             elapsed = int(seconds)
         except (TypeError, ValueError):
-            elapsed = 0
+            elapsed = prev
 
     # 取「正推值」与「累计上报值」的较大者，但不超过封顶
     dur = max(prev, elapsed)
@@ -812,7 +817,14 @@ def heartbeat_session(sid, student_id="default", seconds=None):
 
 
 def end_session(sid, student_id="default"):
-    """结束会话：优先保留心跳已累计的时长，避免收尾时反而把数字改小。"""
+    """
+    结束会话。
+
+    关键（僵尸会话修复）：不再用「now - started_at」的墙钟差值。
+    iOS 上 beforeunload/pagehide 常常迟到很久（甚至等到第二天才触发），
+    用墙钟差值会把「页面挂着没关」的时间也算成学习时间。
+    这里只信任前端心跳累计上报的 duration；若前端传了更准确的值则采用。
+    """
     if not sid:
         return
     rows = query("SELECT started_at, duration FROM sessions WHERE id=?", (sid,))
@@ -823,25 +835,41 @@ def end_session(sid, student_id="default"):
         sent = int(rows[0].get("duration") or 0)
     except (TypeError, ValueError):
         sent = 0
-    elapsed = int((now_cn() - start).total_seconds()) if start else 0
-    dur = max(sent, elapsed, 0)
-    dur = min(dur, SESSION_MAX_SECONDS)
+    # 以已上报的心跳累计值为准；不再与墙钟差值取 max
+    dur = max(0, min(sent, SESSION_MAX_SECONDS))
+    # 结束时间用「开始 + 实际学习时长」，避免明细里出现"学了2小时却跨了7小时"的矛盾
+    end_dt = (start + timedelta(seconds=dur)) if start else now_cn()
+    now = now_cn()
+    if end_dt > now:
+        end_dt = now
     execute("UPDATE sessions SET ended_at=?, duration=? WHERE id=?",
-            (now_cn().isoformat(timespec="seconds"), dur, sid))
+            (end_dt.isoformat(timespec="seconds"), dur, sid))
 
 
-def _settle_open_sessions(student_id=None, exclude_sid=None, cap=None):
+def _settle_open_sessions(student_id=None, exclude_sid=None, cap=None, keep_reported=True):
     """
     保底结算：把「没有正常结束」的会话补上时长并标记结束。
 
+    关键（僵尸会话修复）：
+      不再用「now - started_at」的墙钟差值来补时长。
+      因为 iOS Safari 在杀进程 / 关机 / 锁屏时不触发 pagehide/beforeunload，
+      会话就这么挂着；等第二天打开页面时，墙钟差值已经是 7 小时，
+      一算就把整晚都记成学习时间。
+
+      会话里真正可信的是**前端心跳上报的累计值**（duration 字段）：
+      只要页面还活着，每 60 秒就会上报一次真实可见秒数。
+      所以这里默认：
+        - keep_reported=True：以已上报的 duration 为准，不再叠加墙钟时间
+        - 只有「完全没上报过」（duration=0）时才用墙钟差值，并按 cap 封顶
+
     参数:
-      cap: 封顶秒数。默认 SESSION_MAX_SECONDS（2 小时）。
-           服务启动时传入 SESSION_HEARTBEAT_GRACE（3 分钟），
-           因为重启意味着进程已退出超过心跳周期，残留会话不可能还在活跃学习，
-           只应补偿一个心跳宽限期，避免把僵尸会话算成 2 小时。
+      cap: 无上报值时的封顶秒数。默认 SESSION_MAX_SECONDS（2 小时）；
+           服务重启时传 SESSION_HEARTBEAT_GRACE（3 分钟）。
+      keep_reported: 是否信任已上报的心跳累计值（默认 True）。
     """
     _cap = cap if cap is not None else SESSION_MAX_SECONDS
-    sql = "SELECT id, student_id, started_at FROM sessions WHERE ended_at IS NULL"
+    sql = ("SELECT id, student_id, started_at, duration FROM sessions "
+           "WHERE ended_at IS NULL")
     args = []
     if student_id:
         sql += " AND student_id=?"
@@ -854,17 +882,34 @@ def _settle_open_sessions(student_id=None, exclude_sid=None, cap=None):
     except Exception:
         return 0
     n = 0
+    now = now_cn()
     for r in rows:
         start = _parse_dt(r["started_at"])
         if not start:
             continue
-        dur = int((now_cn() - start).total_seconds())
-        dur = max(0, min(dur, _cap))
-        # 服务启动结算时，如果跨度短于最小计时阈值，直接记 0 并结束，避免误点残留变成正数
-        if dur < SESSION_MIN_SECONDS:
-            dur = 0
+        try:
+            reported = int(r.get("duration") or 0)
+        except (TypeError, ValueError):
+            reported = 0
+
+        if keep_reported and reported > 0:
+            # 有上报值：这就是真实可见时长，直接采用（仍不超过封顶）
+            dur = min(reported, SESSION_MAX_SECONDS)
+            # 结束时间取「开始 + 实际学习时长」，而不是当前墙钟时间，
+            # 否则明细里会显示成"23:40 → 次日06:23 学了2小时"这种矛盾记录
+            end_dt = start + timedelta(seconds=dur)
+            if end_dt > now:
+                end_dt = now
+        else:
+            # 没有任何上报（纯僵尸 / 误点秒退）：按 cap 封顶，短于阈值记 0
+            wall = int((now - start).total_seconds())
+            dur = max(0, min(wall, _cap))
+            if dur < SESSION_MIN_SECONDS:
+                dur = 0
+            end_dt = start + timedelta(seconds=dur)
+
         execute("UPDATE sessions SET ended_at=?, duration=? WHERE id=?",
-                (now_cn().isoformat(timespec="seconds"), dur, r["id"]))
+                (end_dt.isoformat(timespec="seconds"), dur, r["id"]))
         n += 1
     return n
 
@@ -873,14 +918,18 @@ def settle_stale_sessions():
     """
     服务启动时调用：把上次进程退出时残留的未结束会话结算掉。
 
-    重要：不能直接按 SESSION_MAX_SECONDS（2 小时）封顶，因为旧会话可能是
-    很久以前甚至多日前打开的，或者只是误点秒退。若全按 2 小时算，会导致
-    服务每次 Reload 都把僵尸会话虚增为 2 小时，累加出几百上千分钟。
+    两条规则：
+      1. 有心跳上报值的会话 → 直接采用上报值（那是真实的可见学习时长），
+         不再叠加任何墙钟时间。这解决「iOS 杀进程后会话挂到第二天，
+         被算成 7 小时」的僵尸会话问题。
+      2. 完全没有上报值的会话（纯僵尸 / 误点秒退）→ 最多补
+         SESSION_HEARTBEAT_GRACE（3 分钟），低于 5 秒记为 0。
+         绝不能按 2 小时封顶，否则每次 Reload 都会把僵尸会话虚增成 2 小时。
 
-    这里只用「心跳宽限期」封顶：进程重启时，残留会话最多再补 3 分钟，
-    且低于 5 秒噪声阈值的记为 0。
+    注意：不能全按 SESSION_MAX_SECONDS 处理。旧会话可能是很久以前打开的，
+    若全按 2 小时算，服务每次 Reload 都会累加出几百上千分钟。
     """
-    return _settle_open_sessions(cap=SESSION_HEARTBEAT_GRACE)
+    return _settle_open_sessions(cap=SESSION_HEARTBEAT_GRACE, keep_reported=True)
 
 
 def get_study_time(student_id="default", days=7):
@@ -918,7 +967,8 @@ def get_session_log(student_id="default", days=7, min_seconds=5):
 
     - start/end 为北京时间 HH:MM（跨天会话的 end 会带次日标记）
     - 过滤掉时长低于 min_seconds 的误点噪声
-    - 未结束的会话 ongoing=True，end 用当前时间兜底显示
+    - 未结束的会话 ongoing=True；但若「最后心跳」已超过宽限期（3 分钟），
+      视为页面已被杀掉（iOS 常见），改按「开始 + 已上报时长」显示，不再挂着"进行中"
     """
     since = (now_cn().date() - timedelta(days=days - 1)).isoformat()
     rows = query("""
@@ -940,7 +990,16 @@ def get_session_log(student_id="default", days=7, min_seconds=5):
         et = _parse_dt(r["ended_at"])
         ongoing = et is None
         if ongoing:
-            et = now
+            # 判定僵尸：已上报时长远小于「从开始到现在」的墙钟差，
+            # 说明中间有大量时间没心跳（页面被杀了/手机关机了）。
+            # 这时按「开始 + 已上报时长」当作结束点，避免显示成跨夜长条。
+            lived = st + timedelta(seconds=secs)
+            wall = (now - st).total_seconds()
+            if wall - secs > SESSION_HEARTBEAT_GRACE:
+                et = lived          # 僵尸会话：结束点 = 开始 + 真实学习时长
+                ongoing = False
+            else:
+                et = now            # 真的还在学
 
         # 时长展示
         if secs < 60:

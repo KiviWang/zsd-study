@@ -843,6 +843,14 @@ const HEARTBEAT_MS = 60000;
 let SESSION_TICK = null;      // 心跳定时器
 let SEC_VISIBLE = 0;          // 本次会话累计可见秒数（前端自算）
 let T0 = null;                // 本段可见期的起点（ms）
+let SESSION_DAY = null;       // 本会话所属的自然日（中国时区），用于跨夜保护
+
+/* 取中国时区的今天（YYYY-MM-DD）。
+   服务器在美东，浏览器本地时区不一定准，统一按 UTC+8 算。 */
+function _todayCN(){
+  const t = new Date(Date.now() + 8*3600*1000);
+  return t.toISOString().slice(0,10);
+}
 
 function _flushVisible(){
   /* 把当前可见段的时长并入累计值 */
@@ -865,6 +873,7 @@ async function startSession(page){
     const d = await r.json();
     SESSION_ID = d.sessionId;
     SEC_VISIBLE = 0;
+    SESSION_DAY = _todayCN();     // 记录本会话所属的自然日，用于跨夜保护
     if(SESSION_ID){
       _resumeTick();
       if(SESSION_TICK) clearInterval(SESSION_TICK);
@@ -876,6 +885,13 @@ async function startSession(page){
 /* 上报一次时长。silent=true 时失败不打扰用户 */
 async function beat(silent){
   if(!SESSION_ID) return;
+  // 跨夜保护：昨夜的会话如果还活着，先结算掉再开新的，
+  // 避免 iOS 杀进程后残留的会话把整晚算进昨天。
+  if(SESSION_DAY && SESSION_DAY !== _todayCN()){
+    endSession();
+    startSession(location.hash || "course");
+    return;
+  }
   _flushVisible();
   const secs = SEC_VISIBLE;
   if(T0 === null) T0 = Date.now();   // 继续计时
@@ -907,6 +923,23 @@ function endSession(){
 
 window.addEventListener("pagehide", endSession);
 window.addEventListener("beforeunload", endSession);
+
+/* iOS 补充：Safari 在「杀进程 / 切到其他 App / 锁屏」时常常不触发 pagehide。
+   这几层监听尽量把「离开」这一刻抓住，把已上报的可见时长落库。
+   sendBeacon 是异步不阻塞的，多触发几次也无副作用（服务端幂等）。 */
+window.addEventListener("blur", ()=>{ if(document.hidden) endSession(); });
+document.addEventListener("freeze", endSession);        // Page Lifecycle API
+window.addEventListener("unload", endSession);
+
+/* 页面从「被冻结/丢弃」恢复时（bfcache）：
+   浏览器可能把旧页面原样恢复，此时旧会话已被服务端结算过，
+   直接开一个新会话，避免时长挂到旧会话上造成跨夜。 */
+window.addEventListener("pageshow", (e)=>{
+  if(e.persisted && ME){
+    SESSION_ID = null;
+    startSession(location.hash || "course");
+  }
+});
 
 /* 前后台切换：后台直接结束本次会话（已上报的可见时长落库），回前台开启新会话。
    这样一次会话只记录一段"连续可见学习"，避免页面在后台挂几小时导致会话跨度过大。 */
