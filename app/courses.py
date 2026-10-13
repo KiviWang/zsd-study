@@ -11,6 +11,7 @@
 
 from courses_history import HISTORY_COURSES
 from courses_geo import GEO_COURSES
+from essay_bank import attach_essay
 
 COURSES_POLITICS = [
 {
@@ -261,6 +262,10 @@ DAILY_PLAN = [
 # 顺序即前端课程列表顺序（政治 → 历史 → 地理）
 # ---------------------------------------------------------
 COURSES = COURSES_POLITICS + HISTORY_COURSES + GEO_COURSES
+
+# 给政治各课挂上「每日论述题」题库（quiz_essay → tier=essay）
+# 论述题独立统计、每日推送一道，不参与「基础/强化」自测的正确率口径。
+attach_essay(COURSES)
 
 
 def get_course(cid):

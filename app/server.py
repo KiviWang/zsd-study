@@ -10,6 +10,7 @@ from datetime import timedelta
 from flask import Flask, jsonify, request, send_from_directory, session
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import db
 from db import (init_db, get_config, set_config, record_answer, get_wrong_questions,
                 get_stats, start_session, end_session, get_study_time, get_streak,
                 get_session_log,
@@ -21,7 +22,11 @@ from db import (init_db, get_config, set_config, record_answer, get_wrong_questi
                 register_student, verify_login, get_student_by_username,
                 ensure_anonymous_student,
                 anon_stats, anon_course_answers, anon_wrong_questions,
-                anon_study_time, anon_streak, anon_tasks, anon_reset_course)
+                anon_study_time, anon_streak, anon_tasks, anon_reset_course,
+                # 论述题（每日一题）：独立记录与统计
+                get_essay_answered_order, get_essay_answers, get_essay_stats,
+                get_essay_log, get_essay_day_answered,
+                anon_essay_order, anon_essay_day, anon_essay_stats, anon_essay_log)
 from courses import COURSES, DAILY_PLAN, get_course
 import bank
 from bank import (seed_from_courses, get_questions, get_question, count_questions,
@@ -261,18 +266,28 @@ def api_courses():
         stats = get_stats(current_student())
         streak = get_streak(current_student())
     by_course = stats["by_course"]
+    # 论述题汇总（政治课）：用于课程列表里的「每日论述」入口卡片
+    if _is_anon():
+        es_sum = anon_essay_stats(_anon_payload())
+    else:
+        es_sum = get_essay_stats(current_student())
     out = []
     for c in COURSES:
         cs = by_course.get(c["id"], {"total": 0, "right": 0})
+        etot = count_questions(c["id"], bank.TIER_ESSAY)
         out.append({
             "id": c["id"], "no": c["no"], "title": c["title"],
             "subtitle": c["subtitle"], "color": c["color"],
             "subject": c.get("subject", "政治"),
             "quizCount": count_questions(c["id"]) or len(c["quiz"]),
             "answered": cs["total"],
-            "right": cs["right"]
+            "right": cs["right"],
+            "essayTotal": etot,
         })
     return jsonify({"courses": out, "stats": stats,
+                    "essay": {"total": sum(x["essayTotal"] for x in out),
+                              "answered": es_sum["total"],
+                              "rate": es_sum["rate"]},
                     "studentName": get_config("student_name", "同学"),
                     "streak": streak})
 
@@ -298,6 +313,15 @@ def api_course(cid):
     data["quiz"] = quiz
     data["mode"] = mode
     data["modes"] = available_modes(cid)
+    # 论述题库信息：前端据此决定是否显示「每日论述」标签
+    _en = count_questions(cid, bank.TIER_ESSAY)
+    if _en:
+        if _is_anon():
+            _es = anon_essay_stats(_anon_payload())
+        else:
+            _es = get_essay_stats(current_student())
+        data["essay"] = {"total": _en, "answered": _es["total"],
+                         "rate": _es["rate"]}
     if _is_anon():
         data["myAnswers"] = anon_course_answers(cid, _anon_payload())
     else:
@@ -409,6 +433,152 @@ def api_wrongbook():
             "fixed": bool(w.get("fixed")), "wrongTimes": w.get("wrong_times", 1),
         })
     return jsonify({"groups": list(groups.values()), "total": len(wrongs)})
+
+
+@app.route("/api/essay/<cid>")
+def api_essay(cid):
+    """
+    每日论述题 · 取今日题。
+
+    返回：
+      · question  今日这道题（material / q / 4 个角度选项），**不含答案**
+      · answered  该学生今天是否已答（已答则附带自己选的那一项与对错）
+      · stats     论述题累计统计（答过多少道、正确率）—— 独立于自测题口径
+      · remaining 题库里还剩多少道没做过（让学生心里有数）
+
+    每日切换按中国时区零点（day_key = 北京时间 YYYY-MM-DD）。
+    同一天无论刷新多少次，拿到的都是同一道题。
+    """
+    c = get_course(cid)
+    if not c:
+        return jsonify({"error": "not found"}), 404
+    if not bank.get_essay_questions(cid):
+        return jsonify({"error": "no essay bank", "question": None}), 200
+
+    day = db.now_cn().date().isoformat()
+
+    if _is_anon():
+        payload = _anon_payload()
+        order = db.anon_essay_order(cid, payload)
+        q = bank.pick_daily_essay(cid, day, order)
+        answered = db.anon_essay_day(cid, day, payload)
+        stats = db.anon_essay_stats(payload)
+    else:
+        sid = current_student()
+        order = db.get_essay_answered_order(cid, sid)
+        q = bank.pick_daily_essay(cid, day, order)
+        answered = db.get_essay_day_answered(cid, day, sid)
+        stats = db.get_essay_stats(sid)
+
+    if not q:
+        return jsonify({"error": "empty", "question": None}), 200
+
+    total = bank.count_questions(cid, bank.TIER_ESSAY)
+    done = len(set(order))
+    safe = _public_essay(q, hide_answer=True)
+
+    # 已答：把自己选的那项、正确项、解析、择优说明都给出来（用于回看）
+    detail = None
+    if answered:
+        detail = {
+            "chosen": answered["chosen"],
+            "correct": bool(answered["correct"]),
+            "answer": q["a"],
+            "explain": q["e"],
+            "why": q["why"],
+        }
+
+    return jsonify({
+        "courseId": cid, "no": c["no"], "title": c["title"], "color": c["color"],
+        "day": day,
+        "question": safe,
+        "answered": detail,
+        "stats": stats,
+        "remaining": max(total - done, 0),
+        "total": total,
+    })
+
+
+@app.route("/api/essay/history/<cid>")
+def api_essay_history(cid):
+    """
+    历史题目：该课论述题做过的记录（按时间倒序），
+    每条都带上题目全文 + 自己的选择 + 正确项 + 解析，供回看复习。
+    """
+    c = get_course(cid)
+    if not c:
+        return jsonify({"error": "not found"}), 404
+
+    if _is_anon():
+        logs = db.anon_essay_log(cid, _anon_payload())
+    else:
+        logs = db.get_essay_log(cid, current_student())
+
+    items = []
+    for lg in logs:
+        q = bank.get_question(lg["qid"])
+        if not q:
+            continue
+        items.append({
+            "qid": lg["qid"],
+            "date": lg["date"],
+            "answeredAt": lg["answeredAt"],
+            "chosen": lg["chosen"],
+            "correct": bool(lg["correct"]),
+            "question": _public_essay(q, hide_answer=False),
+        })
+    return jsonify({"courseId": cid, "items": items, "total": len(items)})
+
+
+def _public_essay(q, hide_answer=True):
+    """题目 → 前端结构。hide_answer=True 时不下发正确答案与解析（防作弊）。"""
+    d = {
+        "qid": q["qid"],
+        "qtype": q.get("qtype", "essay"),
+        "material": q.get("material", ""),
+        "q": q["q"],
+        "o": q["o"],
+    }
+    if not hide_answer:
+        d["a"] = q["a"]
+        d["e"] = q.get("e", "")
+        d["why"] = q.get("why", "")
+    return d
+
+
+@app.route("/api/essay/answer", methods=["POST"])
+def api_essay_answer():
+    """提交每日论述题答案，服务端判分。记录进错题本体系（mode='essay'）。"""
+    data = request.get_json() or {}
+    cid = data.get("courseId")
+    qid = data.get("qid")
+    chosen = data.get("chosen")
+
+    if not get_course(cid):
+        return jsonify({"error": "invalid course"}), 400
+    q = bank.get_question(qid) if qid else None
+    if not q or q.get("tier") != bank.TIER_ESSAY:
+        return jsonify({"error": "invalid question"}), 400
+    if chosen is None:
+        return jsonify({"error": "no answer"}), 400
+
+    correct = (int(chosen) == int(q["a"]))
+    if not _is_anon():
+        db.record_answer(cid, -1, int(chosen), correct, current_student(),
+                         qid=qid, mode=bank.MODE_ESSAY)
+
+    resp = {
+        "correct": correct,
+        "answer": q["a"],
+        "explain": q.get("e", ""),
+        "why": q.get("why", ""),
+    }
+    # 顺带把最新统计返回，前端可直接更新顶部的「已答 N 道 / 正确率」
+    if _is_anon():
+        resp["stats"] = db.anon_essay_stats(_anon_payload())
+    else:
+        resp["stats"] = db.get_essay_stats(current_student())
+    return jsonify(resp)
 
 
 @app.route("/api/course/reset", methods=["POST"])

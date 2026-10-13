@@ -307,6 +307,83 @@
     text-decoration:none;transition:background .15s,transform .12s}
   .admin-btn:active{transform:scale(.94);background:#f3c8c4}
   .loading{text-align:center;color:var(--text3);font-size:13px;padding:30px 0}
+
+  /* ===== 每日论述题 ===== */
+  /* 材料卡：当天题目的情境/引文，用偏暖的底色与自测题区分开 */
+  .es-head{background:linear-gradient(135deg,#3a4a7a,#2b3860);color:#fff;
+    border-radius:16px;padding:15px 16px;margin-bottom:12px}
+  .es-head h2{margin:0 0 4px;font-size:16px;color:#fff}
+  .es-head p{margin:0;font-size:11.5px;opacity:.82;line-height:1.55}
+  .es-stat{display:flex;gap:8px;margin:12px 0}
+  .es-stat .s{flex:1;background:#fff;border-radius:12px;padding:10px 8px;text-align:center;
+    border:1px solid var(--line)}
+  .es-stat .s b{display:block;font-size:19px;color:var(--brand);font-weight:800;line-height:1.2}
+  .es-stat .s span{font-size:10.5px;color:var(--text3)}
+  .es-mat{background:#fdfaf3;border-left:3px solid #e0b95e;border-radius:0 10px 10px 0;
+    padding:12px 13px;font-size:13.5px;line-height:1.75;color:var(--text);margin-bottom:12px;
+    white-space:pre-line}
+  .es-mat-tag{display:inline-block;font-size:10.5px;font-weight:700;color:#9a7a22;
+    background:#f8ecc9;border-radius:5px;padding:1px 7px;margin-bottom:7px}
+  .es-stem{font-size:14.5px;font-weight:700;line-height:1.6;margin:0 0 12px}
+  /* 选项是"整句阐述"，比自测题长，行距要松一点 */
+  .es-opt{display:flex;gap:9px;align-items:flex-start;padding:12px 13px;
+    border:1.5px solid var(--line);border-radius:13px;background:#fff;margin-bottom:8px;
+    font-size:13px;line-height:1.7;transition:transform .12s,border-color .15s,background .15s}
+  .es-opt:active{transform:scale(.995)}
+  .es-opt .key{width:20px;height:20px;border-radius:50%;flex:0 0 auto;background:#f2f3f5;
+    color:var(--text2);font-size:11px;font-weight:800;display:flex;align-items:center;
+    justify-content:center;margin-top:1px}
+  .es-opt:hover{border-color:var(--brand)}
+  .es-opt.right{border-color:var(--ok);background:var(--ok-soft)}
+  .es-opt.right .key{background:var(--ok);color:#fff}
+  .es-opt.wrong{border-color:var(--brand);background:var(--brand-soft)}
+  .es-opt.wrong .key{background:var(--brand);color:#fff}
+  .es-opt.mine::after{content:"你选的";font-size:9.5px;color:var(--text3);
+    margin-left:auto;flex:0 0 auto;align-self:center;white-space:nowrap}
+  .es-opt.locked{cursor:default}
+  .es-opt.locked:hover{border-color:var(--line)}
+  .es-opt.right.locked:hover,.es-opt.wrong.locked:hover{border-color:inherit}
+  .es-feedback{border-radius:12px;padding:12px 13px;margin-top:10px;font-size:12.5px;
+    line-height:1.75;display:none}
+  .es-feedback.show{display:block}
+  .es-feedback.ok{background:var(--ok-soft);border:1px solid #bfe3c6}
+  .es-feedback.no{background:var(--brand-soft);border:1px solid #f0c4bf}
+  .es-feedback .t{font-weight:800;margin-bottom:6px;font-size:13px}
+  .es-feedback .lb{font-weight:700;color:var(--text2);display:block;margin-top:8px}
+  .es-feedback .why{color:var(--text2)}
+  /* 历史按钮固定在小标题右侧 */
+  .es-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    margin-bottom:12px}
+  .es-bar .t{font-size:14px;font-weight:800}
+  .es-his-btn{font-size:12px;font-weight:700;color:var(--brand);background:#fff;
+    border:1.5px solid var(--brand);border-radius:20px;padding:6px 13px;cursor:pointer;
+    white-space:nowrap;transition:background .15s}
+  .es-his-btn:active{background:var(--brand-soft)}
+  /* 历史列表 */
+  .es-his{background:#fff;border-radius:14px;padding:13px;margin-bottom:10px;
+    border:1px solid var(--line)}
+  .es-his .htop{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+  .es-his .hdate{font-size:11px;color:var(--text3)}
+  .es-his .hbadge{font-size:10.5px;font-weight:700;border-radius:5px;padding:1px 7px}
+  .es-his .hbadge.ok{background:var(--ok-soft);color:#2f7d43}
+  .es-his .hbadge.no{background:var(--brand-soft);color:#a33b34}
+  .es-his .hmat{font-size:12px;color:var(--text2);line-height:1.68;margin:0 0 8px;
+    padding-left:9px;border-left:2px solid #e0dbd0}
+  .es-his .hstem{font-size:13px;font-weight:700;line-height:1.6;margin:0 0 8px}
+  .es-his .hopt{font-size:12px;line-height:1.65;padding:6px 9px;border-radius:8px;
+    background:#fafbfc;margin-bottom:5px;color:var(--text2)}
+  .es-his .hopt.r{background:var(--ok-soft);color:var(--text);font-weight:600}
+  .es-his .hopt.w{background:var(--brand-soft);color:var(--text)}
+  .es-his .hexp{font-size:11.5px;color:var(--text3);line-height:1.68;margin-top:7px}
+  .es-his .hexp b{color:var(--text2)}
+  .es-fold{font-size:12px;color:var(--brand);font-weight:700;text-align:center;
+    padding:7px;cursor:pointer}
+  .es-empty{background:#fff;border-radius:14px;padding:28px 16px;text-align:center;
+    color:var(--text3);font-size:12.5px;line-height:1.75;border:1px solid var(--line)}
+  /* 课程列表里的「每日论述」入口卡：用暖色描边与普通课程区分 */
+  .es-entry{border:1.5px dashed #e0b95e;background:linear-gradient(135deg,#fffdf6,#fff8e6)}
+  .es-badge{background:linear-gradient(135deg,#e0b95e,#c99b2e);color:#fff !important;
+    font-size:15px !important}
 </style>
 </head>
 <body>
@@ -415,10 +492,13 @@
       <button class="tab on" data-tab="pt" onclick="switchTab('pt')">复习要点</button>
       <button class="tab" data-tab="vd" onclick="switchTab('vd')">看片清单</button>
       <button class="tab" data-tab="qz" onclick="switchTab('qz')">自测练习</button>
+      <button class="tab" data-tab="es" id="tabEsBtn" onclick="switchTab('es')"
+        style="display:none">每日论述</button>
     </div>
     <div id="tabPt"></div>
     <div id="tabVd" style="display:none"></div>
     <div id="tabQz" style="display:none"></div>
+    <div id="tabEs" style="display:none"></div>
   </div>
 </div>
 
@@ -1034,6 +1114,17 @@ async function loadCourses(){
         <span class="sj-tip">${folded?"展开":"收起"}</span>
       </div>
       <div class="subj-body" id="sb_${esc(s.k)}" style="${folded?"display:none":""}">` +
+      // 政治：在课程列表最前面加一个「每日论述」入口（每天一道，按日期轮换）
+      (s.k==="政治" && (d.essay && d.essay.total)
+        ? `<div class="course-item es-entry" onclick="openEssayToday()">
+            <div class="course-badge es-badge">论</div>
+            <div class="course-info">
+              <p class="ct">每日论述题</p>
+              <p class="cs">每天 1 道 · 材料 + 4 个角度选最贴切</p>
+            </div>
+            <div class="course-prog"><b>${d.essay.answered||0}</b>已答</div>
+            <div class="arrow">›</div>
+          </div>` : "") +
       list.map(c=>`
       <div class="course-item" onclick="openCourse('${c.id}')">
         <div class="course-badge${c.no.replace(/[第课\s]/g,"").length>1?" b2":""}" style="background:${c.color}">${c.no.replace(/[第课\s]/g,"")}</div>
@@ -1069,6 +1160,10 @@ async function openCourse(cid){
   $("dHead").innerHTML = `<p class="dh-no">${esc(c.no)}</p>
     <h2>${esc(c.title)}</h2><p class="dh-sub">${esc(c.subtitle)}</p>`;
   renderPoints(c); renderVideos(c); renderQuiz(c);
+  // 「每日论述」标签只对有论述题库的科目（政治）显示
+  const hasEssay = !!(c.essay && c.essay.total);
+  $("tabEsBtn").style.display = hasEssay ? "" : "none";
+  if(!hasEssay) $("tabEs").innerHTML = "";
   switchTab("pt", true);
   go("scrDetail");
 }
@@ -1085,6 +1180,8 @@ function switchTab(t,silent){
   $("tabPt").style.display = t==="pt"?"block":"none";
   $("tabVd").style.display = t==="vd"?"block":"none";
   $("tabQz").style.display = t==="qz"?"block":"none";
+  $("tabEs").style.display = t==="es"?"block":"none";
+  if(t==="es") loadEssay();
   if(!silent) window.scrollTo(0,0);
 }
 
@@ -1239,6 +1336,169 @@ async function answer(qi,choice){
   e.classList.add("show");
   e.innerHTML = (d.correct?"✅ 答对了！":"❌ 答错了。") + "<b>解析：</b>" + esc(d.explain);
   loadCourses();
+}
+
+/* ================= 每日论述题 ================= */
+/* 需求：在每课 20 道自测题之外，每天额外做一道论述题。
+   形式：给一段材料，4 个"不同角度的完整阐述"里选最贴切的一项（不打字/不语音）。
+   每天按中国时区零点换一道新题；累计答了几道、正确率单独统计；
+   做错的题一并进错题本；右上角可回看历史题目。 */
+let ES = null;   // 当前课程的论述题数据
+
+/* 从课程列表的「每日论述」入口进入：跳到政治第一课（有论述题库的课）的论述标签 */
+function openEssayToday(){
+  const c = COURSES.find(x=>(x.subject||"政治")==="政治" && x.essayTotal);
+  const cid = c ? c.id : "p1";
+  openCourse(cid).then(()=>switchTab("es"));
+}
+
+async function loadEssay(){
+  if(!CUR) return;
+  $("tabEs").innerHTML = `<div class="loading">加载今日论述题…</div>`;
+  let d;
+  try{
+    const r = await api("/api/essay/"+CUR.id);
+    d = await r.json();
+  }catch(e){
+    $("tabEs").innerHTML = `<div class="empty">加载失败，请检查网络后重试</div>`;
+    return;
+  }
+  if(!d || !d.question){
+    $("tabEs").innerHTML = `<div class="es-empty">本科目暂无论述题题库</div>`;
+    return;
+  }
+  ES = d;
+  renderEssay();
+}
+
+function renderEssay(){
+  const d = ES, q = d.question, st = d.stats || {};
+  const done = !!d.answered;
+  const mine = done ? d.answered.chosen : -1;
+  const rightIdx = done ? d.answered.answer : -1;
+
+  const optHtml = q.o.map((o,j)=>{
+    let cls = "es-opt";
+    if(done){
+      cls += " locked";
+      if(j===rightIdx) cls += " right";
+      else if(j===mine) cls += " wrong";
+      if(j===mine) cls += " mine";
+    }
+    return `<div class="${cls}" ${done?"":`onclick="chooseEssay(${j})"`}>
+      <span class="key">${"ABCD"[j]}</span><span>${esc(o)}</span>
+    </div>`;
+  }).join("");
+
+  let fb = "";
+  if(done){
+    const a = d.answered;
+    fb = `<div class="es-feedback ${a.correct?"ok":"no"} show">
+      <div class="t">${a.correct?"✅ 选对了！":"❌ 这一项不是最贴切的"}</div>
+      <span class="lb">最优项：${"ABCD"[a.answer]}</span>
+      <div>${esc(a.explain||"")}</div>
+      ${a.why?`<span class="lb">为什么其它项不够好</span><div class="why">${esc(a.why)}</div>`:""}
+    </div>`;
+  }
+
+  $("tabEs").innerHTML = `
+    <div class="es-head">
+      <h2>每日一道论述题</h2>
+      <p>${esc(d.day)} · 读材料 → 选最贴切的一项 · 每天零点换新题，不重复</p>
+    </div>
+    <div class="es-stat">
+      <div class="s"><b>${st.total||0}</b><span>累计答过（道）</span></div>
+      <div class="s"><b>${st.rate||0}%</b><span>正确率</span></div>
+      <div class="s"><b>${d.remaining}</b><span>题库还剩</span></div>
+    </div>
+    <div class="es-bar">
+      <span class="t">今日题目</span>
+      <button class="es-his-btn" onclick="openEssayHistory()">🕘 历史题目</button>
+    </div>
+    <div class="es-mat"><span class="es-mat-tag">材料</span>${esc(q.material)}</div>
+    <p class="es-stem">${esc(q.q)}</p>
+    <div id="esOpts">${optHtml}</div>
+    ${fb}
+    <p class="hint" style="margin-top:12px">
+      答错的题会自动进「错题本」，可在底部导航查看、重做；点「历史题目」可回看之前做过的题。
+    </p>`;
+}
+
+async function chooseEssay(j){
+  const box = $("esOpts");
+  if(!box || box.dataset.locked) return;
+  const q = ES.question;
+  box.dataset.locked = "1";
+  // 立即锁住，防止连点
+  box.querySelectorAll(".es-opt").forEach(o=>o.classList.add("locked"));
+
+  let d;
+  try{
+    const r = await api("/api/essay/answer",{method:"POST",
+      body:JSON.stringify({courseId:CUR.id,qid:q.qid,chosen:j})});
+    d = await r.json();
+  }catch(e){
+    box.dataset.locked = "";
+    alert("提交失败，请检查网络后重试");
+    return;
+  }
+  // 匿名：把这次作答存本地（服务器不留痕）
+  if(isAnon()) anonStore.addAnswer(CUR.id, q.qid, -1, j, d.correct, "essay");
+
+  // 用服务端返回的判分结果重绘（保证与后台一致）
+  ES.answered = {chosen:j, correct:d.correct, answer:d.answer,
+                 explain:d.explain, why:d.why};
+  ES.stats = d.stats || ES.stats;
+  renderEssay();
+  // 顶部小标题/统计变了，刷新课程列表的角标
+  loadCourses();
+}
+
+/* ---- 历史题目 ---- */
+async function openEssayHistory(){
+  if(!CUR) return;
+  $("tabEs").innerHTML = `<div class="loading">加载历史题目…</div>`;
+  let d;
+  try{
+    const r = await api("/api/essay/history/"+CUR.id);
+    d = await r.json();
+  }catch(e){
+    $("tabEs").innerHTML = `<div class="empty">加载失败，请重试</div>`;
+    return;
+  }
+  const items = (d && d.items) || [];
+  if(!items.length){
+    $("tabEs").innerHTML = `
+      <button class="back" onclick="renderEssay()">‹ 返回今日题目</button>
+      <div class="es-empty">还没有做过的论述题。<br>完成今天的题目后，这里会出现历史记录。</div>`;
+    return;
+  }
+  const rows = items.map(it=>{
+    const q = it.question, a = q.a;
+    const opts = q.o.map((o,j)=>{
+      let cls = "hopt";
+      if(j===a) cls += " r";
+      else if(j===it.chosen) cls += " w";
+      const tag = (j===a ? "✓ " : (j===it.chosen ? "✗ " : ""));
+      return `<div class="${cls}">${"ABCD"[j]}. ${tag}${esc(o)}</div>`;
+    }).join("");
+    return `<div class="es-his">
+      <div class="htop">
+        <span class="hbadge ${it.correct?"ok":"no"}">${it.correct?"答对":"答错"}</span>
+        <span class="hdate">${esc(it.date)} · ${esc(it.qid)}</span>
+      </div>
+      ${q.material?`<p class="hmat">${esc(q.material)}</p>`:""}
+      <p class="hstem">${esc(q.q)}</p>
+      ${opts}
+      ${q.e?`<div class="hexp"><b>解析：</b>${esc(q.e)}</div>`:""}
+      ${q.why?`<div class="hexp"><b>择优说明：</b>${esc(q.why)}</div>`:""}
+    </div>`;
+  }).join("");
+  $("tabEs").innerHTML = `
+    <button class="back" onclick="renderEssay()">‹ 返回今日题目</button>
+    <div class="es-bar"><span class="t">历史题目（${items.length} 道）</span></div>
+    ${rows}`;
+  window.scrollTo(0,0);
 }
 
 /* ================= 计划 ================= */

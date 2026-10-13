@@ -20,11 +20,14 @@ from db import query, execute
 # 出题模式
 MODE_BASIC = "basic"     # 固定顺序（基础巩固）
 MODE_RANDOM = "random"   # 随机抽题（强化训练）
+MODE_REDO = "redo"       # 错题重做
+MODE_ESSAY = "essay"     # 每日论述题（材料题择优，独立统计）
 
 # 分层（题库难度）
 TIER_BASIC = "basic"     # 基础题库：跟课本，必做
 TIER_ADVANCED = "advanced"  # 强化题库：加深，选做
 TIER_SPRINT = "sprint"   # 冲刺题库：考前（预留）
+TIER_ESSAY = "essay"     # 论述题库：每天一题，独立于自测
 
 
 def _row_to_q(r):
@@ -46,9 +49,11 @@ def _row_to_q(r):
         "e": r.get("explain", ""),
         "img": r.get("img") or "",
         "svg": r.get("svg") or "",
+        # 论述题专用：材料原文（普通选择题为空）
+        "material": r.get("material") or "",
+        # 论述题专用：择优解析（为什么这个选项最贴切，其余差在哪）
+        "why": r.get("why") or "",
     }
-
-
 # =========================================================
 # 播种：把代码里的题库写入数据库（幂等，重复执行不会重复插入）
 # =========================================================
@@ -81,9 +86,10 @@ def seed_from_courses(courses):
     """
     从 courses.py 的 COURSES 结构导入题目。
 
-    每个课程可有两组题：
-      · quiz      → tier=basic，qid=<cid>_01、_02…（基础巩固，固定顺序）
-      · quiz_adv  → tier=advanced，qid=<cid>_a01、_a02…（强化训练，随机抽题）
+    每个课程可有三组题：
+      · quiz       → tier=basic，qid=<cid>_01、_02…（基础巩固，固定顺序）
+      · quiz_adv   → tier=advanced，qid=<cid>_a01、_a02…（强化训练，随机抽题）
+      · quiz_essay → tier=essay，qid=<cid>_e01、_e02…（每日论述，独立统计）
 
     已有同 qid 的题目跳过（不覆盖），保证人工在库里改过的题不被冲掉。
     返回 (新增数, 跳过数)
@@ -99,9 +105,10 @@ def seed_from_courses(courses):
             (cid, c.get("no", ""), c.get("subject", "政治"), c.get("title", ""),
              c.get("subtitle", ""), c.get("color", "#2f6fed"), _course_order(cid))
         )
-        # 两组题：基础 + 强化
+        # 三组题：基础 + 强化 + 论述
         groups = ((c.get("quiz", []), TIER_BASIC, ""),
-                  (c.get("quiz_adv", []), TIER_ADVANCED, "a"))
+                  (c.get("quiz_adv", []), TIER_ADVANCED, "a"),
+                  (c.get("quiz_essay", []), TIER_ESSAY, "e"))
         for qlist, tier, prefix in groups:
             for i, q in enumerate(qlist):
                 qid = f"{cid}_{prefix}{i+1:02d}"
@@ -111,12 +118,13 @@ def seed_from_courses(courses):
                     continue
                 execute(
                     "INSERT INTO questions(qid,course_id,subject,tier,qtype,stem,options,answer,"
-                    "explain,img,svg,sort_order,active,created_at) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,?)",
+                    "explain,img,svg,material,why,sort_order,active,created_at) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)",
                     (qid, cid, c.get("subject", "政治"), tier,
                      q.get("qtype", "choice"),
                      q["q"], json.dumps(q["o"], ensure_ascii=False), q["a"],
-                     q.get("e", ""), q.get("img", ""), q.get("svg", ""), i, now)
+                     q.get("e", ""), q.get("img", ""), q.get("svg", ""),
+                     q.get("material", ""), q.get("why", ""), i, now)
                 )
                 added += 1
     return added, skipped
@@ -132,13 +140,19 @@ def _course_order(cid):
 # 读取题目
 # =========================================================
 def get_questions(course_id, tier=None):
-    """取某课程题目（按 sort_order 固定顺序）"""
+    """
+    取某课程题目（按 sort_order 固定顺序）。
+
+    注意：不传 tier 时默认**排除论述题**（tier=essay）。
+    论述题有自己的每日推送与统计体系，混进自测题里会让
+    「每课 20 题」的口径和正确率统计全部失真。
+    """
     if tier:
         rows = query("SELECT * FROM questions WHERE course_id=? AND tier=? AND active=1 "
                      "ORDER BY sort_order, qid", (course_id, tier))
     else:
         rows = query("SELECT * FROM questions WHERE course_id=? AND active=1 "
-                     "ORDER BY sort_order, qid", (course_id,))
+                     "AND tier<>? ORDER BY sort_order, qid", (course_id, TIER_ESSAY))
     return [_row_to_q(r) for r in rows]
 
 
@@ -148,14 +162,25 @@ def get_question(qid):
     return _row_to_q(rows[0]) if rows else None
 
 
+def get_essay_questions(course_id):
+    """取某课的论述题库（按 sort_order，供每日轮换与历史查看）"""
+    rows = query("SELECT * FROM questions WHERE course_id=? AND tier=? AND active=1 "
+                 "ORDER BY sort_order, qid", (course_id, TIER_ESSAY))
+    return [_row_to_q(r) for r in rows]
+
+
 def count_questions(course_id, tier=None):
-    """统计题目数"""
+    """
+    统计题目数。
+    不传 tier 时排除论述题，与 get_questions 口径保持一致
+    （否则课程列表会显示「自测 50 题」，实际自测只有 20 题）。
+    """
     if tier:
         rows = query("SELECT COUNT(*) AS n FROM questions WHERE course_id=? AND tier=? AND active=1",
                      (course_id, tier))
     else:
-        rows = query("SELECT COUNT(*) AS n FROM questions WHERE course_id=? AND active=1",
-                     (course_id,))
+        rows = query("SELECT COUNT(*) AS n FROM questions WHERE course_id=? AND active=1 AND tier<>?",
+                     (course_id, TIER_ESSAY))
     return rows[0]["n"] if rows else 0
 
 
@@ -237,6 +262,53 @@ def get_course_meta(course_id=None):
         rows = query("SELECT * FROM courses WHERE cid=? AND active=1", (course_id,))
         return rows[0] if rows else None
     return query("SELECT * FROM courses WHERE active=1 ORDER BY sort_order, cid")
+
+
+# =========================================================
+# 每日论述题
+# =========================================================
+def essay_courses():
+    """返回所有带论述题库的课程（cid 列表，按课程顺序）"""
+    rows = query("SELECT DISTINCT course_id FROM questions WHERE tier=? AND active=1",
+                 (TIER_ESSAY,))
+    return sorted(r["course_id"] for r in rows)
+
+
+def pick_daily_essay(course_id, day_key, answered_order=None):
+    """
+    为某一天挑一道论述题。
+
+    ⚠️ 核心原则：**当天的题完全由日期决定，与学生做过什么无关。**
+
+    这一点必须说清楚，因为踩过坑：
+      早先的实现是"从第一道没做过的题里挑"，结果学生答完当天的题，
+      再刷新页面就会跳到下一道（那道题进了"已做"集合）——今天的题当天就变了，
+      学生看到的是另一道题，解析也对不上号。
+      现在的实现把日期直接映射到题库下标，当天怎么刷新都是同一道。
+
+    规则（对应需求"每天的题不要重复"）：
+      用「年*372 + 月*31 + 日」对题库长度取模得到一个**稳定下标**。
+      题库 N 道时，日期每 +1 天下标 +1，因此连续 N 天各出不重复的一道，
+      第 N+1 天才开始下一轮 —— 一个月的题库正好够轮流一个月。
+
+    参数:
+      course_id      : 课程 id，如 p1
+      day_key        : 日期字符串 YYYY-MM-DD（按中国时区零点切换）
+      answered_order : 已做过的 qid 列表。**仅用于统计"还剩多少道没做"**，
+                       不参与选题（参与就会破坏当天稳定性）。
+    返回题目字典，题库为空时返回 None。
+    """
+    pool = get_essay_questions(course_id)
+    if not pool:
+        return None
+
+    n = len(pool)
+    try:
+        y, m, d = (int(x) for x in str(day_key).split("-")[:3])
+        idx = (y * 372 + m * 31 + d) % n
+    except (ValueError, TypeError):
+        idx = random.randrange(n)
+    return pool[idx]
 
 
 # =========================================================

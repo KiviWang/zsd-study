@@ -308,6 +308,12 @@ def _migrate():
             execute("ALTER TABLE questions ADD COLUMN img TEXT DEFAULT ''")
         if "svg" not in cols:
             execute("ALTER TABLE questions ADD COLUMN svg TEXT DEFAULT ''")
+        # 论述题专用：材料原文（选择题为空）
+        if "material" not in cols:
+            execute("ALTER TABLE questions ADD COLUMN material TEXT DEFAULT ''")
+        # 论述题专用：择优解析（说明为什么这个选项最贴切）
+        if "why" not in cols:
+            execute("ALTER TABLE questions ADD COLUMN why TEXT DEFAULT ''")
 
 
 def init_db():
@@ -657,30 +663,43 @@ def get_course_answers(course_id, student_id="default"):
             "byQidBasic": by_qid_basic, "byQidRandom": by_qid_random}
 
 
-def _all_latest_answers(student_id="default", where_extra=""):
+def _all_latest_answers(student_id="default", where_extra="", include_essay=False):
     """
     合并"按qid"与"按idx"两条路径的最新作答，避免遗漏历史数据。
     注意：分组键为 (qid, mode)，同一道题在基础/随机下会各返回一行。
+
+    include_essay=False（默认）时排除论述题（mode='essay'）。
+    论述题有自己的累计/正确率口径，混进自测统计会让「每课 20 题」
+    的进度和正确率全部失真，所以默认隔离。
     """
-    a = _latest_answers_where(where_extra, (student_id, student_id), by_qid=True)
-    b = _latest_answers_where(where_extra, (student_id, student_id), by_qid=False)
+    if include_essay:
+        extra = where_extra
+    else:
+        extra = (where_extra + " AND COALESCE(a.mode,'basic')<>'essay'") if where_extra \
+            else " AND COALESCE(a.mode,'basic')<>'essay'"
+    a = _latest_answers_where(extra, (student_id, student_id), by_qid=True)
+    b = _latest_answers_where(extra, (student_id, student_id), by_qid=False)
     return a + b
 
 
-def get_wrong_questions(student_id="default"):
+def get_wrong_questions(student_id="default", include_essay=True):
     """
     错题本数据源。
 
     规则（对应需求"错题重做答对后保留但标记已订正"）：
       · 只要某题曾经做错过，就留在错题本里
-      · 同一道题在基础/随机/重做下都算同一道题，按 qid 去重
+      · 同一道题在基础/随机/重做/论述下都算同一道题，按 qid 去重
         （qid 缺失的历史数据退化为 course_id+idx）
       · 若最近一次作答（任意模式）已答对，则 fixed=True（标记"已订正"）
       · modes 记录该题曾出错过的模式来源，wrong_times 记录出错次数
 
     这样错题本不会因为做对就消失，学生能看到自己订正过的足迹。
+
+    include_essay=True（默认）：**每日论述题做错也一并收进错题本**，
+    对应需求"答错的论述题一并在错题本里管理"。论述题的 qid 是 <cid>_eNN，
+    与自测题不冲突，会各自成条。
     """
-    all_rows = _all_latest_answers(student_id)
+    all_rows = _all_latest_answers(student_id, include_essay=include_essay)
     wrong_rows = [r for r in all_rows if not r["correct"]]
 
     # 按 key 归并"最近一次作答"（用于判断是否已订正）
@@ -759,6 +778,129 @@ def get_stats(student_id="default"):
         "by_course_mode": by_course_mode,
         "wrong_count": total - right,
     }
+
+
+# =========================================================
+# 每日论述题（独立统计，不混入自测题的正确率）
+# =========================================================
+def get_essay_answered_order(course_id, student_id="default"):
+    """
+    返回该学生在某课**已做过的论述题 qid 列表，按作答时间从早到晚**。
+
+    用途：
+      · 判断"这道题是否做过"，从而每日推一道没做过的
+      · 题库全部做完需要循环时，优先选最早做过的，把重复间隔拉到最大
+    """
+    rows = query("""
+        SELECT qid, MIN(answered_at) AS first_at
+        FROM answers
+        WHERE student_id=? AND course_id=? AND mode='essay' AND qid IS NOT NULL
+        GROUP BY qid
+        ORDER BY first_at ASC
+    """, (student_id, course_id))
+    return [r["qid"] for r in rows if r.get("qid")]
+
+
+def get_essay_answers(course_id, student_id="default"):
+    """
+    该课论述题的作答状态：{qid: {chosen, correct, answered_at}}（取每道题最近一次）。
+    """
+    rows = query("""
+        SELECT a.qid, a.chosen, a.correct, a.answered_at
+        FROM answers a
+        INNER JOIN (
+            SELECT qid, MAX(id) AS max_id FROM answers
+            WHERE student_id=? AND course_id=? AND mode='essay' AND qid IS NOT NULL
+            GROUP BY qid
+        ) t ON a.id = t.max_id
+        WHERE a.student_id=?
+    """, (student_id, course_id, student_id))
+    out = {}
+    for r in rows:
+        out[r["qid"]] = {"chosen": r["chosen"], "correct": bool(r["correct"]),
+                         "answeredAt": r["answered_at"]}
+    return out
+
+
+def get_essay_stats(student_id="default"):
+    """
+    论述题总体统计（与自测题完全隔离）。
+
+    口径说明：
+      · total   = 答过的**不同题目数**（同一道题只算一次，按最近一次判分）
+      · right   = 其中最近一次答对的题数
+      · rate    = right / total
+      · days    = 有论述题作答记录的天数（用于"连续/累计打卡"展示）
+    """
+    rows = query("""
+        SELECT a.qid, a.correct, a.answered_at
+        FROM answers a
+        INNER JOIN (
+            SELECT qid, MAX(id) AS max_id FROM answers
+            WHERE student_id=? AND mode='essay' AND qid IS NOT NULL
+            GROUP BY qid
+        ) t ON a.id = t.max_id
+        WHERE a.student_id=?
+    """, (student_id, student_id))
+    total = len(rows)
+    right = sum(1 for r in rows if r["correct"])
+    days = len({str(r["answered_at"] or "")[:10] for r in rows if r.get("answered_at")})
+    return {
+        "total": total,
+        "right": right,
+        "wrong": total - right,
+        "rate": round(right / total * 100) if total else 0,
+        "days": days,
+    }
+
+
+def get_essay_log(course_id, student_id="default", limit=60):
+    """
+    历史题目列表：该课论述题的作答轨迹，按作答时间倒序。
+
+    每条含：qid、作答日期（YYYY-MM-DD）、我的选择、是否正确、是否已订正。
+    题目内容由调用方（server）按 qid 取，保证只返回有作答记录的题。
+    """
+    rows = query("""
+        SELECT a.qid, a.chosen, a.correct, a.answered_at
+        FROM answers a
+        INNER JOIN (
+            SELECT qid, MAX(id) AS max_id FROM answers
+            WHERE student_id=? AND course_id=? AND mode='essay' AND qid IS NOT NULL
+            GROUP BY qid
+        ) t ON a.id = t.max_id
+        WHERE a.student_id=?
+        ORDER BY a.answered_at DESC
+        LIMIT ?
+    """, (student_id, course_id, student_id, limit))
+    return [{"qid": r["qid"], "chosen": r["chosen"],
+             "correct": bool(r["correct"]),
+             "answeredAt": r["answered_at"],
+             "date": str(r["answered_at"] or "")[:10]} for r in rows]
+
+
+def get_essay_day_answered(course_id, day_key, student_id="default"):
+    """
+    查某一天（YYYY-MM-DD，中国时区）该课论述题是否已作答，返回作答记录或 None。
+    用于"今天这道题做没做"的判断：做过就不再重复推。
+    """
+    row = query("""
+        SELECT a.qid, a.chosen, a.correct, a.answered_at
+        FROM answers a
+        INNER JOIN (
+            SELECT qid, MAX(id) AS max_id FROM answers
+            WHERE student_id=? AND course_id=? AND mode='essay'
+              AND SUBSTR(answered_at,1,10)=?
+            GROUP BY qid
+        ) t ON a.id = t.max_id
+        WHERE a.student_id=?
+        ORDER BY a.answered_at DESC LIMIT 1
+    """, (student_id, course_id, day_key, student_id))
+    if not row:
+        return None
+    r = row[0]
+    return {"qid": r["qid"], "chosen": r["chosen"],
+            "correct": bool(r["correct"]), "answeredAt": r["answered_at"]}
 
 
 # =========================================================
@@ -1287,3 +1429,69 @@ def anon_reset_course(course_id, payload):
     keep = [a for a in (payload or {}).get("answers", []) or []
             if str(a.get("cid")) != str(course_id)]
     return {"answers": keep}
+
+
+# ---------------- 匿名模式：论述题 ----------------
+def _anon_essay_rows(course_id, payload):
+    """匿名记录里，某课论述题（mode='essay'）的所有行，按时间正序"""
+    rows = [r for r in _anon_rows(payload)
+            if r["course_id"] == course_id and (r.get("mode") or "") == "essay"
+            and r.get("qid")]
+    rows.sort(key=lambda r: r.get("answered_at") or "")
+    return rows
+
+
+def anon_essay_order(course_id, payload):
+    """该课已做过的论述题 qid（按首次作答时间正序），用于每日选题避开重复"""
+    seen, order = set(), []
+    for r in _anon_essay_rows(course_id, payload):
+        if r["qid"] not in seen:
+            seen.add(r["qid"])
+            order.append(r["qid"])
+    return order
+
+
+def anon_essay_day(course_id, day_key, payload):
+    """某天该课论述题的作答记录（匿名），没有则 None"""
+    rows = [r for r in _anon_essay_rows(course_id, payload)
+            if str(r.get("answered_at") or "")[:10] == day_key]
+    if not rows:
+        return None
+    # 取当天最后一条（同一题当天重复作答时以最后一次为准）
+    latest = {}
+    for r in rows:
+        latest[r["qid"]] = r
+    chosen = sorted(latest.values(), key=lambda r: r["answered_at"])[-1]
+    return {"qid": chosen["qid"], "chosen": chosen["chosen"],
+            "correct": bool(chosen["correct"]), "answeredAt": chosen["answered_at"]}
+
+
+def anon_essay_stats(payload):
+    """匿名用户的论述题统计（同一道题只算最近一次）"""
+    latest = {}
+    for r in _anon_rows(payload):
+        if (r.get("mode") or "") != "essay" or not r.get("qid"):
+            continue
+        old = latest.get(r["qid"])
+        if old is None or (r.get("answered_at") or "") >= (old.get("answered_at") or ""):
+            latest[r["qid"]] = r
+    vals = list(latest.values())
+    total = len(vals)
+    right = sum(1 for r in vals if r["correct"])
+    days = len({(r.get("answered_at") or "")[:10] for r in vals} - {""})
+    return {"total": total, "right": right, "wrong": total - right,
+            "rate": round(right / total * 100) if total else 0, "days": days}
+
+
+def anon_essay_log(course_id, payload, limit=60):
+    """匿名用户该课论述题的历史作答（按时间倒序，同一题取最近一次）"""
+    latest = {}
+    for r in _anon_essay_rows(course_id, payload):
+        old = latest.get(r["qid"])
+        if old is None or (r.get("answered_at") or "") >= (old.get("answered_at") or ""):
+            latest[r["qid"]] = r
+    vals = sorted(latest.values(), key=lambda r: r.get("answered_at") or "", reverse=True)
+    return [{"qid": r["qid"], "chosen": r["chosen"], "correct": bool(r["correct"]),
+             "answeredAt": r["answered_at"],
+             "date": str(r.get("answered_at") or "")[:10]} for r in vals[:limit]]
+
