@@ -43,6 +43,8 @@ ORDER = [
     "test_history_full.py", "test_turso.py", "test_backup.py",
     "test_ui.py", "test_fold_ui.py", "test_wrongbook_ui.py",
     "test_browser.py", "test_network_resilience.py",
+    # 性能相关：自带服务（5110/5111），不依赖上面的 5097
+    "test_perf.py", "test_perf_browser.py",
 ]
 
 

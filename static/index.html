@@ -556,6 +556,28 @@
 </div>
 
 <script>
+/* 首屏优先：脚本体量大（约 52KB），在弱网 + 低端机上解析会占几百毫秒。
+   这里把初始化推迟到「首屏已绘制」之后，让用户先看到界面而不是白屏；
+   若浏览器支持 requestIdleCallback 就等到空闲，否则退化为一个宏任务。
+   注意：只是推迟启动，不减少任何功能。 */
+function _startup(fn){
+  const run = ()=>{
+    try{ fn(); }
+    catch(e){ console.error("[启动失败]", e); }
+  };
+  if(document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", ()=>{
+      if(typeof requestIdleCallback === "function"){
+        requestIdleCallback(run, {timeout: 800});
+      }else{
+        setTimeout(run, 0);
+      }
+    }, {once: true});
+  }else{
+    setTimeout(run, 0);
+  }
+}
+
 /* ================= 状态 ================= */
 let COURSES = [];      // 课程列表
 let CUR = null;        // 当前课程详情
@@ -741,15 +763,20 @@ async function doLoginPwd(){
   if(!password){ setMsg("请输入密码", true); return; }
   const btns = document.querySelectorAll("#formLogin .login-btn");
   btns.forEach(b=>b.disabled=true); setMsg("正在登录…");
+  // 走 api() 封装：带超时 + 自动重试。
+  // 跨境链路偶发拥塞（实测出现过持续数分钟的不通），裸 fetch 会一直转圈，
+  // 封装后最多等 API_TIMEOUT_MS，失败也会重试，并在慢的时候给用户反馈。
+  const slowTip = setTimeout(()=>setMsg("网络较慢，正在重试…"), 4000);
   try{
-    const r = await fetch("/api/login_pwd",{method:"POST",
-      headers:{"Content-Type":"application/json"},
+    const r = await api("/api/login_pwd",{method:"POST",
       body:JSON.stringify({username,password})});
     const d = await r.json();
+    clearTimeout(slowTip);
     if(!d.ok){ setMsg(d.msg||"登录失败", true); btns.forEach(b=>b.disabled=false); return; }
     afterAuth(d);
   }catch(e){
-    setMsg("网络异常，请重试", true); btns.forEach(b=>b.disabled=false);
+    clearTimeout(slowTip);
+    setMsg("网络异常，请检查网络后重试", true); btns.forEach(b=>b.disabled=false);
   }
 }
 
@@ -766,15 +793,17 @@ async function doRegister(){
   if(password.length < 6){ setMsg("密码至少 6 位", true); return; }
   const btns = document.querySelectorAll("#formReg .login-btn");
   btns.forEach(b=>b.disabled=true); setMsg("正在注册…");
+  const slowTip = setTimeout(()=>setMsg("网络较慢，正在重试…"), 4000);
   try{
-    const r = await fetch("/api/register",{method:"POST",
-      headers:{"Content-Type":"application/json"},
+    const r = await api("/api/register",{method:"POST",
       body:JSON.stringify({username,phone,name,password})});
     const d = await r.json();
+    clearTimeout(slowTip);
     if(!d.ok){ setMsg(d.msg||"注册失败", true); btns.forEach(b=>b.disabled=false); return; }
     afterAuth(d);
   }catch(e){
-    setMsg("网络异常，请重试", true); btns.forEach(b=>b.disabled=false);
+    clearTimeout(slowTip);
+    setMsg("网络异常，请检查网络后重试", true); btns.forEach(b=>b.disabled=false);
   }
 }
 
@@ -782,13 +811,16 @@ async function doRegister(){
 async function doAnonymous(){
   const btns = document.querySelectorAll("#scrLogin .login-btn");
   btns.forEach(b=>b.disabled=true); setMsg("正在进入…");
+  const slowTip = setTimeout(()=>setMsg("网络较慢，正在重试…"), 4000);
   try{
-    const r = await fetch("/api/anonymous",{method:"POST"});
+    const r = await api("/api/anonymous",{method:"POST"});
     const d = await r.json();
+    clearTimeout(slowTip);
     if(!d.ok){ setMsg("进入失败，请重试", true); btns.forEach(b=>b.disabled=false); return; }
     afterAuth(d);
   }catch(e){
-    setMsg("网络异常，请重试", true); btns.forEach(b=>b.disabled=false);
+    clearTimeout(slowTip);
+    setMsg("网络异常，请检查网络后重试", true); btns.forEach(b=>b.disabled=false);
   }
 }
 
@@ -798,14 +830,17 @@ async function doLogin(){
   if(!code){ setMsg("请输入登录码", true); return; }
   const btn = document.querySelector("#codeLoginBox .login-btn");
   if(btn) btn.disabled = true; setMsg("正在进入…");
+  const slowTip = setTimeout(()=>setMsg("网络较慢，正在重试…"), 4000);
   try{
-    const r = await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},
+    const r = await api("/api/login",{method:"POST",
       body:JSON.stringify({code})});
     const d = await r.json();
+    clearTimeout(slowTip);
     if(!d.ok){ setMsg(d.msg || "登录失败", true); if(btn) btn.disabled=false; return; }
     afterAuth(d);
   }catch(e){
-    setMsg("网络异常，请重试", true); if(btn) btn.disabled=false;
+    clearTimeout(slowTip);
+    setMsg("网络异常，请检查网络后重试", true); if(btn) btn.disabled=false;
   }
 }
 
@@ -901,7 +936,7 @@ function boot(){
 }
 
 /* 回车提交（各输入框都支持直接回车） */
-window.addEventListener("DOMContentLoaded", ()=>{
+_startup(()=>{
   const bind = (id, fn)=>{
     const el = $(id);
     if(el) el.addEventListener("keydown", e=>{ if(e.key==="Enter") fn(); });

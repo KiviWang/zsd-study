@@ -344,7 +344,8 @@ function readLastSid(){
 
 async function loadBoard(){
   const url = "/api/admin/dashboard" + (CUR_SID ? ("?sid=" + encodeURIComponent(CUR_SID)) : "");
-  const r = await fetch(url);
+  // 走 jfetch 封装：带超时 + 重试，避免跨境链路拥塞时看板一直转圈
+  const r = await jfetch(url);
   if(r.status===401){ $("login").style.display="block"; $("board").style.display="none"; return; }
   DATA = await r.json();
   // 以服务端返回的学生为准（记住的 sid 可能已被删除/停用，这时后端会回落到默认学生）

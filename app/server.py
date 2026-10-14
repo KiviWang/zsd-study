@@ -47,6 +47,11 @@ DEFAULT_STUDENT = "default"   # 旧数据的归属者（首个学生）
 TOKEN_HEADER = "X-ZSD-Token"
 ANON_HEADER = "X-ZSD-Anon"    # 匿名模式：本地记录随请求带上，不落库
 
+# 响应压缩与缓存策略：跨境链路下把首屏传输量压到约 1/4，并让重复访问走 304。
+# 详细背景与参数说明见 app/perf.py。
+import perf  # noqa: E402
+perf.install(app)
+
 # 关键：模块加载时即建表，保证 gunicorn 等 WSGI 启动方式也能初始化数据库
 init_db()
 
