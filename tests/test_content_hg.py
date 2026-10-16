@@ -49,10 +49,11 @@ cs = d.get("courses", [])
 subjects = {}
 for c in cs:
     subjects.setdefault(c.get("subject", "政治"), []).append(c)
-chk("课程总数 = 39", len(cs) == 39, f"实际 {len(cs)}")
+chk("课程总数 = 50", len(cs) == 50, f"实际 {len(cs)}")
 chk("政治 4 课", len(subjects.get("政治", [])) == 4)
 chk("历史 29 课", len(subjects.get("历史", [])) == 29, f"实际 {len(subjects.get('历史', []))}")
-chk("地理 6 课", len(subjects.get("地理", [])) == 6)
+chk("地理 17 课", len(subjects.get("地理", [])) == 17,
+    f"实际 {len(subjects.get('地理', []))}")
 chk("每课都有 subject 字段", all("subject" in c for c in cs))
 chk("每课题数 20（基础10+强化10）", all(c.get("quizCount") == 20 for c in cs),
     str([(c["id"], c.get("quizCount")) for c in cs if c.get("quizCount") != 20]))
@@ -61,7 +62,11 @@ print()
 print("=" * 60)
 print("【2】各课内容完整性（知识点 / 视频 / 题库）")
 print("=" * 60)
-for cid in ["h1", "h2", "h5", "h10", "h15", "h20", "h29", "g1", "g2", "g3", "g4", "g5", "g6"]:
+for cid in ["h1", "h2", "h5", "h10", "h15", "h20", "h29",
+            "g1", "g2", "g3", "g4", "g5", "g6",
+            # 按 2024 版教材目录补齐的第三~六章
+            "g7", "g8", "g9", "g10", "g11", "g12", "g13",
+            "g14", "g15", "g16", "g17"]:
     d, st = req(f"/api/course/{cid}")
     pts = d.get("points", [])
     vids = d.get("videos", [])
@@ -76,7 +81,7 @@ print("【3】SVG 配图题：内容非空且是合法 SVG")
 print("=" * 60)
 expect_svg = {
     "h1_01": "旧石器时间轴", "h2_01": "东周流程图", "g1_01": "八大行星",
-    "g2_05": "太阳大气分层", "g3_02": "地质年代", "g5_03": "大气垂直分层",
+    "g2_05": "太阳大气分层", "g3_05": "地质年代", "g5_03": "大气垂直分层",
     "g6_02": "大气受热过程",
 }
 for qid, desc in expect_svg.items():
@@ -108,7 +113,10 @@ print("=" * 60)
 print("【5】题干与选项质量：无占位符、无乱码")
 print("=" * 60)
 allq = []
-for cid in ["h1", "h2", "h5", "h10", "h15", "h20", "h29", "g1", "g2", "g3", "g4", "g5", "g6"]:
+for cid in ["h1", "h2", "h5", "h10", "h15", "h20", "h29",
+            "g1", "g2", "g3", "g4", "g5", "g6",
+            "g7", "g8", "g9", "g10", "g11", "g12", "g13",
+            "g14", "g15", "g16", "g17"]:
     for mode in ["basic", "random"]:
         d, _ = req(f"/api/course/{cid}?mode={mode}&limit=10", token=tk)
         allq += d.get("quiz", [])

@@ -12,7 +12,7 @@ s = requests.Session()
 # ---------- 1. 学生端 API ----------
 r = s.get(f"{BASE}/api/courses")
 d = r.json()
-ck("课程列表返回 39 课", len(d["courses"]) == 39, f"{len(d['courses'])}")
+ck("课程列表返回 50 课", len(d["courses"]) == 50, f"{len(d['courses'])}")
 ck("课程含 quizCount=20", all(c["quizCount"]==20 for c in d["courses"]))
 ck("初始进度为0", d["stats"]["total"] == 0)
 
